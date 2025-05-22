@@ -1,108 +1,163 @@
-# Utility functions for the Hive Mind project
-
-import logging
-import json
 import os
-import openai
+import logging
+import sqlite3
 import numpy as np
-from typing import List
-from dotenv import load_dotenv
-from openai import OpenAI
+from openai import OpenAI, OpenAIError
 
-# Load environment variables (if not already loaded by main script, good to have here too)
-load_dotenv()
+DB_NAME = "swarmmind.db"
 
-# Constants for embeddings (similar to swarms.py)
-EMBEDDING_MODEL = "text-embedding-ada-002"
+# Configure logging
+logger = logging.getLogger(__name__)
+
+
+def configure_logging():
+    """Configures basic logging for the application."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    logger.info("Logging configured.")
+
+
+def initialize_database():
+    """Initializes the SQLite database and creates tables if they don't exist."""
+    db_path = os.path.abspath(DB_NAME)
+    conn = None
+    try:
+        logger.info(f"Initializing database at: {db_path}")
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+
+        # Create experiences table
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS experiences (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task TEXT,
+                agent_name TEXT,
+                content TEXT,
+                confidence_score REAL,
+                feedback TEXT,
+                embedding TEXT,
+                timestamp TEXT
+            )
+            """
+        )
+        logger.info("'experiences' table checked/created.")
+
+        # Create memories table
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_name TEXT NOT NULL,
+                memory_type TEXT NOT NULL,
+                content_text TEXT NOT NULL,
+                content_embedding TEXT,
+                metadata_json TEXT,
+                timestamp TEXT NOT NULL
+            )
+            """
+        )
+        logger.info("'memories' table checked/created.")
+
+        # Create tasks table
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tasks (
+                task_id TEXT PRIMARY KEY,
+                description TEXT NOT NULL,
+                status TEXT NOT NULL, -- e.g., queued, running, completed, failed
+                result TEXT,          -- Store JSON or text result
+                error_message TEXT,   -- Store error if status is 'failed'
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        logger.info("'tasks' table checked/created.")
+
+        conn.commit()
+        logger.info("Database initialized and tables created successfully.")
+
+    except sqlite3.Error as e:
+        logger.error(
+            f"SQLite error during database initialization (path: {db_path}): {e}"
+        )
+        raise  # Re-raise the exception to signal failure
+    finally:
+        if conn:
+            conn.close()
+            logger.info(f"Database connection to {db_path} closed.")
+
 
 # Initialize OpenAI client
-# This assumes OPENAI_API_KEY is set in the environment
-# If it might not be, add error handling or a check
-if not openai.api_key:
-    openai.api_key = os.getenv("OPENAI_API_KEY")
+try:
+    # Ensure the API key is available
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    if not openai_api_key:
+        logger.error("OPENAI_API_KEY environment variable not set.")
+        raise ValueError("OPENAI_API_KEY environment variable not set.")
 
-client = OpenAI()
+    # Initialize client
+    client = OpenAI(api_key=openai_api_key)
+    logger.info("OpenAI client initialized successfully.")
 
-# Configure logging (example, can be expanded)
-def configure_logging(level=logging.INFO, log_file=None):
-    logging.basicConfig(level=level, 
-                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    if log_file:
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-        logging.getLogger().addHandler(file_handler)
-    return logging.getLogger(__name__) # Return a logger instance for the calling module
+except OpenAIError as e:
+    logger.error(f"Failed to initialize OpenAI client: {e}")
+    # Depending on the application's needs, you might want to exit or handle this differently
+    raise
+except ValueError as e:
+    logger.error(e)
+    # Handle missing API key error appropriately
+    raise
 
-# Experience loading/saving (as mentioned in the original world_builder.py)
-EXPERIENCES_FILE = "data/experiences.json"
 
-def save_experiences(experiences, filepath=EXPERIENCES_FILE):
+def get_embedding(text, model="text-embedding-3-small"):
+    """Generates an embedding for the given text using the specified OpenAI model."""
+    if not text or not isinstance(text, str):
+        logger.error("Invalid text input for embedding.")
+        return None
     try:
-        with open(filepath, 'w') as f:
-            json.dump(experiences, f, indent=4)
-        logging.info(f"Experiences saved to {filepath}")
-    except IOError as e:
-        logging.error(f"Error saving experiences to {filepath}: {e}")
-
-def load_experiences(filepath=EXPERIENCES_FILE):
-    try:
-        if os.path.exists(filepath):
-            with open(filepath, 'r') as f:
-                return json.load(f)
-        else:
-            logging.info(f"No experiences file found at {filepath}, starting fresh.")
-            return []
-    except (IOError, json.JSONDecodeError) as e:
-        logging.error(f"Error loading experiences from {filepath}: {e}")
-        return []
-
-# Placeholder for database initialization (if using SQLite later from plan)
-def initialize_database():
-    # This would set up SQLite tables if used.
-    # For now, ensure data directory exists for experiences.json
-    data_dir = os.path.dirname(EXPERIENCES_FILE)
-    try:
-        os.makedirs(data_dir, exist_ok=True) # Ensure directory is created, exist_ok=True prevents error if it exists
-        logging.info(f"Ensured data directory exists: {data_dir}")
-    except OSError as e:
-        logging.error(f"Error creating data directory {data_dir}: {e}")
-    pass
-
-# Embedding and Similarity Utilities
-
-def get_embedding(text: str, model: str = EMBEDDING_MODEL) -> List[float]:
-    """Get embedding for text using OpenAI API."""
-    # Get a logger instance, possibly the root logger if configure_logging wasn't called from here
-    logger = logging.getLogger(__name__) 
-    try:
-        response = client.embeddings.create(
-            input=text.replace("\n", " "),
-            model=model
-        )
-        return response.data[0].embedding
+        text = text.replace("\n", " ")
+        response = client.embeddings.create(input=[text], model=model)
+        embedding = response.data[0].embedding
+        # logger.debug(f"Generated embedding for text snippet: {text[:50]}...")
+        return embedding
+    except OpenAIError as e:
+        logger.error(f"OpenAI API error during embedding: {e}")
+        return None
     except Exception as e:
-        logger.error(f"Error getting embedding: {e}")
-        # Return zero vector matching the expected dimension for ada-002
-        # Ensure this dimension is correct for the model used.
-        # For "text-embedding-ada-002", it's 1536.
-        return [0.0] * 1536
+        logger.error(f"An unexpected error occurred during embedding: {e}")
+        return None
 
-def cosine_similarity(a: List[float], b: List[float]) -> float:
-    """Calculate cosine similarity between two vectors."""
-    if not a or not b or len(a) == 0 or len(b) == 0 or len(a) != len(b):
-        # Ensure vectors are not empty and have the same dimension
+
+def cosine_similarity(vec1, vec2):
+    """Calculates the cosine similarity between two vectors."""
+    if vec1 is None or vec2 is None:
+        logger.error("Cannot calculate similarity with None vector(s).")
         return 0.0
-    
-    # Convert to numpy arrays for efficient calculation
-    vec_a = np.array(a)
-    vec_b = np.array(b)
-    
-    dot_product = np.dot(vec_a, vec_b)
-    norm_a = np.linalg.norm(vec_a)
-    norm_b = np.linalg.norm(vec_b)
-    
-    if norm_a == 0 or norm_b == 0:
-        # Avoid division by zero if one of the vectors is a zero vector
+
+    # Ensure vectors are numpy arrays
+    vec1 = np.array(vec1)
+    vec2 = np.array(vec2)
+
+    if vec1.shape != vec2.shape:
+        logger.error(
+            f"Cannot calculate similarity between vectors of different shapes: {vec1.shape} vs {vec2.shape}"
+        )
         return 0.0
-        
-    return dot_product / (norm_a * norm_b)
+
+    # Calculate cosine similarity
+    dot_product = np.dot(vec1, vec2)
+    norm_vec1 = np.linalg.norm(vec1)
+    norm_vec2 = np.linalg.norm(vec2)
+
+    if norm_vec1 == 0 or norm_vec2 == 0:
+        # logger.warning("Cannot calculate similarity with zero vector(s).")
+        return 0.0
+
+    similarity = dot_product / (norm_vec1 * norm_vec2)
+    # logger.debug(f"Calculated cosine similarity: {similarity}")
+    return similarity

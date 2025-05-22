@@ -1,0 +1,51 @@
+[project]
+name = "hivey"
+version = "0.1.0"
+description = "hive-mind"
+authors = [
+    {name = "Puppuccino",email = "97849040+CrazyDubya@users.noreply.github.com"}
+]
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "requests>=2.32.3,<3.0.0",
+    "openai>=1.78.1,<2.0.0",
+    "numpy>=2.2.5,<3.0.0",
+    "python-dotenv (>=1.1.0,<2.0.0)", 
+    "fastapi>=0.115.12,<0.116.0",
+    "uvicorn[standard]>=0.34.2,<0.35.0",
+    "pydantic>=2.11.4,<3.0.0",
+    "typer[all]==0.12.3",
+    "rich==13.7.1",
+    "click~=8.1.7"
+]
+
+[project.group.dev.dependencies]
+black = "^25.1.0"
+flake8 = "^7.2.0"
+mypy = "^1.15.0"
+
+[tool.poetry]
+package-mode = false
+
+[tool.poetry.scripts]
+# You can define scripts here if needed later
+
+[tool.black]
+line-length = 88
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = "E203,W503" # E203: whitespace before ':', W503: line break before binary operator (Black handles these)
+
+[tool.mypy]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+ignore_missing_imports = true # Good to start with, can be made stricter later
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
