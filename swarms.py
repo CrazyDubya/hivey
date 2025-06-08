@@ -92,10 +92,10 @@ class KnowledgeBase:
         if not self.conn:
             raise Exception("Failed to establish DB connection in KnowledgeBase")
 
-        self.cursor = self.conn.cursor()
+        # self.cursor = self.conn.cursor() # Removed: Cursors should be method-scoped
         # Table creation logic moved to utils.initialize_database()
         # try:
-        #     self.cursor.execute(
+        #     # self.cursor.execute( # Example of old usage
         #         """
         #         CREATE TABLE IF NOT EXISTS experiences (
         #             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -162,9 +162,9 @@ class KnowledgeBase:
     ) -> None:
         embedding_json = json.dumps(content_embedding) if content_embedding else None
         metadata_json_str = json.dumps(metadata) if metadata else None
-
+        cursor = self.conn.cursor()
         try:
-            self.cursor.execute(
+            cursor.execute(
                 """
                 INSERT INTO memories (agent_name, memory_type, content_text, content_embedding, metadata_json, timestamp)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -180,9 +180,9 @@ class KnowledgeBase:
             )
             if self.conn:
                 self.conn.commit()
-            logger.debug(f"Added memory '{content_text[:30]}...' to KB.")
+            logger.info(f"KB: Added memory for agent '{agent_name}', type '{memory_type}'. Content preview: '{content_text[:30]}...'. Metadata: {metadata is not None}")
         except sqlite3.Error as e:
-            logger.error(f"SQLite error during add_memory: {e}")
+            logger.error(f"KB: SQLite error in add_memory for agent '{agent_name}', type '{memory_type}': {e}", exc_info=True)
             raise
 
     def save_experience(
@@ -195,9 +195,9 @@ class KnowledgeBase:
     ) -> None:
         content_embedding = get_embedding(content)
         embedding_json = json.dumps(content_embedding)
-
+        cursor = self.conn.cursor()
         try:
-            self.cursor.execute(
+            cursor.execute(
                 """
                 INSERT INTO experiences (task, agent_name, content, confidence_score, feedback, timestamp, embedding)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -214,9 +214,9 @@ class KnowledgeBase:
             )
             if self.conn:
                 self.conn.commit()
-            logger.info(f"Saved experience: {task} - {content[:50]}...")
+            logger.info(f"KB: Saved experience for agent '{agent_name}', task '{task[:30]}...'. Content preview: '{content[:50]}...'. Score: {confidence_score:.2f}")
         except sqlite3.Error as e:
-            logger.error(f"SQLite error during save_experience: {e}")
+            logger.error(f"KB: SQLite error in save_experience for agent '{agent_name}', task '{task[:30]}...': {e}", exc_info=True)
             raise
 
     def query_experiences_by_similarity(
@@ -225,9 +225,10 @@ class KnowledgeBase:
         agent_name_filter: Optional[str] = None,
         limit: int = 5,
     ) -> List[Dict[str, Any]]:
+        logger.info(f"KB: Querying experiences by similarity. Agent filter: '{agent_name_filter}', Limit: {limit}. Embedding provided: {task_embedding is not None and len(task_embedding) > 0}")
         if not task_embedding:
             logger.warning(
-                "Task embedding is empty, cannot perform semantic search for experiences."
+                "KB: Task embedding is empty for query_experiences_by_similarity. Cannot perform semantic search."
             )
             return []
 
@@ -236,13 +237,16 @@ class KnowledgeBase:
         if agent_name_filter:
             query += " WHERE agent_name = ?"
             params.append(agent_name_filter)
+            logger.debug(f"KB: Applying agent_name_filter: {agent_name_filter}")
 
+        cursor = self.conn.cursor() # Get a local cursor
         try:
-            self.cursor.execute(query, tuple(params))
-            all_experiences = self.cursor.fetchall()
+            cursor.execute(query, tuple(params))
+            all_experiences = cursor.fetchall()
+            logger.debug(f"KB: Fetched {len(all_experiences)} experiences from DB before similarity calculation.")
         except sqlite3.Error as e:
             logger.error(
-                f"SQLite error during query_experiences_by_similarity fetch: {e}"
+                f"KB: SQLite error during query_experiences_by_similarity fetch (agent: {agent_name_filter}): {e}", exc_info=True
             )
             return []
 
@@ -288,14 +292,15 @@ class KnowledgeBase:
         # Sort by similarity in descending order
         experiences_with_similarity.sort(key=lambda x: x["similarity"], reverse=True)
 
-        # Return top N
-        return experiences_with_similarity[:limit]
+        top_n_experiences = experiences_with_similarity[:limit]
+        logger.info(f"KB: Returning {len(top_n_experiences)} experiences after similarity scoring and limit. Agent filter: '{agent_name_filter}'.")
+        return top_n_experiences
 
     def semantic_search(
         self, query_embedding: List[float], limit: int = 5
     ) -> List[Dict[str, Any]]:
         """Performs a semantic search for memories based on query embedding."""
-        logger.info(f"Semantic search called with limit {limit}. Currently a stub.")
+        logger.info(f"KB: Semantic search called. Limit: {limit}. Embedding provided: {query_embedding is not None and len(query_embedding) > 0}. Currently a stub.")
         # This is a placeholder. Actual implementation will query 'memories' table.
         # Example structure it might return:
         # return [
@@ -329,8 +334,81 @@ class Agent:
         self.agent_type = agent_type
         self.llm_model_identifier = llm_model_identifier
         self.knowledge_base = KnowledgeBase(connection=db_connection)
-        self.task_history: List[Dict[str, Any]] = [] 
+        self.task_history: List[Dict[str, Any]] = []
         self.creation_time = datetime.datetime.now().isoformat()
+
+        # LLM Provider Handlers Dispatch Table
+        self.LLM_PROVIDER_HANDLERS: Dict[str, Callable] = {
+            "ollama": self._ollama_llm_handler,
+            "xai": self._xai_llm_handler,
+            "openai": self._openai_llm_handler,
+            # Add other providers here, e.g., "anthropic": self._anthropic_llm_handler
+        }
+
+    def _ollama_llm_handler(self, model_name: str, messages: List[Dict[str, Any]], model_params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Handles LLM calls to Ollama models via llm_clients.py."""
+        logger.debug(f"Agent {self.name} using Ollama handler for model {model_name}.")
+        raw_response = call_ollama_chat(
+            model_name=model_name,
+            messages=messages,
+            options=model_params
+        )
+        if raw_response and raw_response.get("error"):
+            logger.error(f"Ollama API error for agent {self.name}, model {model_name}: {raw_response.get('error')}")
+            return {"error": str(raw_response.get("error"))}
+        elif raw_response and raw_response.get("message") and isinstance(raw_response["message"], dict) and "content" in raw_response["message"]:
+            return {"content": raw_response["message"].get("content")}
+        else:
+            logger.warning(f"Unexpected Ollama response structure for agent {self.name}, model {model_name}: {str(raw_response)[:200]}")
+            return {"error": "Unexpected response structure from Ollama."}
+
+    def _xai_llm_handler(self, model_name: str, messages: List[Dict[str, Any]], model_params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Handles LLM calls to X.AI models via llm_clients.py."""
+        logger.debug(f"Agent {self.name} using X.AI handler for model {model_name}.")
+        # Pass relevant model_params if call_xai_chat supports them (e.g., temperature, max_tokens)
+        # For now, call_xai_chat takes temperature and max_tokens directly.
+        # We'll assume model_params might contain these.
+        temperature = model_params.get("temperature") if model_params else None
+        max_tokens = model_params.get("max_tokens") if model_params else None
+
+        raw_response = call_xai_chat(
+            model_name=model_name,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+        if raw_response and raw_response.get("error"):
+            logger.error(f"X.AI API error for agent {self.name}, model {model_name}: {raw_response.get('error')}")
+            return {"error": str(raw_response.get("error"))}
+        elif raw_response and raw_response.get("choices") and isinstance(raw_response["choices"], list) and len(raw_response["choices"]) > 0:
+            first_choice = raw_response["choices"][0]
+            if isinstance(first_choice, dict) and first_choice.get("message") and isinstance(first_choice["message"], dict) and "content" in first_choice["message"]:
+                return {"content": first_choice["message"].get("content")}
+
+        logger.warning(f"Unexpected X.AI response structure for agent {self.name}, model {model_name}: {str(raw_response)[:200]}")
+        return {"error": "Unexpected response structure from X.AI."}
+
+    def _openai_llm_handler(self, model_name: str, messages: List[Dict[str, Any]], model_params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Handles LLM calls to OpenAI models."""
+        logger.debug(f"Agent {self.name} using OpenAI handler for model {model_name}.")
+        try:
+            completion = openai_client.chat.completions.create(
+                model=model_name,
+                messages=messages,  # type: ignore[arg-type]
+                temperature=model_params.get("temperature", 0.7) if model_params else 0.7,
+                max_tokens=model_params.get("max_tokens", 1024) if model_params else 1024,
+            ) # type: ignore[arg-type]
+            if completion.choices and completion.choices[0].message and isinstance(completion.choices[0].message.content, str):
+                return {"content": completion.choices[0].message.content}
+            else:
+                logger.warning(f"Unexpected OpenAI response structure for agent {self.name}, model {model_name}: No content in choices.")
+                return {"error": "Unexpected response structure from OpenAI: No content."}
+        except openai.APIError as e:
+            logger.error(f"OpenAI API Error for agent {self.name}, model {model_name}: {str(e)}")
+            return {"error": f"OpenAI API Error: {str(e)}"}
+        except Exception as e:
+            logger.error(f"General error in OpenAI handler for agent {self.name}, model {model_name}: {str(e)}", exc_info=True)
+            return {"error": f"An unexpected error occurred with OpenAI model: {str(e)}"}
 
     def remember(self, info: Dict[str, Any], long_term: bool = False) -> None:
         info["timestamp"] = datetime.datetime.now().isoformat()
@@ -419,99 +497,65 @@ class Agent:
 
         # Standardized variable for extracted text content
         extracted_text_content: str | None = None
+        llm_response_data: Dict[str, Any] = {}
 
-        try:
-            logger.info(
-                f"Agent {self.name} using model: {self.llm_model_identifier} for task: {task_description[:100]}..."
-            )
+        # Parse provider and model_name from llm_model_identifier
+        parts = self.llm_model_identifier.split("/", 1)
+        if len(parts) == 2:
+            provider_prefix, actual_model_name = parts[0].lower(), parts[1]
+        else: # Default to openai if no prefix
+            provider_prefix, actual_model_name = "openai", self.llm_model_identifier
+            logger.warning(f"Agent {self.name}: LLM identifier '{self.llm_model_identifier}' has no clear provider prefix, defaulting to 'openai'.")
 
-            if self.llm_model_identifier.startswith("ollama/"):
-                raw_response = call_ollama_chat(
-                    model_name=self.llm_model_identifier.split("/", 1)[1],
+        logger.info(
+            f"Agent {self.name} routing task to LLM provider: '{provider_prefix}' with model: '{actual_model_name}' for task: {task_description[:100]}..."
+        )
+
+        handler = self.LLM_PROVIDER_HANDLERS.get(provider_prefix)
+
+        if handler:
+            try:
+                llm_response_data = handler(
+                    model_name=actual_model_name,
                     messages=messages,
-                    options=model_params
-                ) 
-                if (
-                    raw_response
-                    and raw_response.get("message")
-                    and isinstance(raw_response["message"], dict)
-                ):
-                    extracted_text_content = raw_response["message"].get("content")
-                elif raw_response and raw_response.get("error"):
-                    logger.error(
-                        f"Ollama API error for {self.name} ({model_name}): {str(raw_response.get('error')) if isinstance(raw_response, dict) else 'Unknown error'}"
-                    )
-                else:
-                    logger.warning(
-                        f"Unexpected Ollama response structure for {self.name} ({model_name}): {str(raw_response)}"
-                    )
-
-            elif self.llm_model_identifier.startswith("xai/"):
-                model_name = self.llm_model_identifier.split("/", 1)[1]
-                raw_response = call_xai_chat(model_name=model_name, messages=messages)
-                if (
-                    raw_response
-                    and raw_response.get("choices")
-                    and raw_response["choices"]
-                ):
-                    message = raw_response["choices"][0].get("message")
-                    if message and isinstance(message, dict):
-                        extracted_text_content = message.get("content")
-                else:
-                    logger.warning(
-                        f"Unexpected X.AI response structure for {self.name} ({model_name}): {str(raw_response)}"
-                    )
-
-            else:
-                openai_model_name = self.llm_model_identifier
-                if openai_model_name.startswith("openai/"):
-                    openai_model_name = openai_model_name.split("/", 1)[1]
-
-                completion = openai_client.chat.completions.create(
-                    model=openai_model_name,
-                    messages=messages,  # type: ignore[arg-type]
-                    temperature=model_params.get("temperature", 0.7),
-                    max_tokens=model_params.get("max_tokens", 1024),
-                )  # type: ignore[arg-type]
-                if completion.choices and completion.choices[0].message and isinstance(completion.choices[0].message.content, str):
-                    extracted_text_content = completion.choices[0].message.content
-                # else response_content remains None, addressing old L468 error.
-
-            # Common post-processing logic based on extracted_text_content
-            if isinstance(extracted_text_content, str):
-                self.remember({"role": "assistant", "content": extracted_text_content})
-                logger.info(
-                    f"Agent {self.name} received response: {extracted_text_content[:100]}..."
+                    model_params=model_params
                 )
-                if isinstance(extracted_text_content, str):
-                    trimmed_content = extracted_text_content[:100] if len(extracted_text_content) > 100 else extracted_text_content
-                else:
-                    trimmed_content = ""
-                extracted_text_content = trimmed_content
-                if isinstance(extracted_text_content, str):
-                    extracted_text_content = extracted_text_content.strip()
-                # Ensure response_content is a string before returning
-                return str(extracted_text_content) if extracted_text_content is not None else ""
-            else:
-                logger.error(
-                    f"Agent {self.name} received no content or non-string content from LLM ({self.llm_model_identifier})."
-                )
-                return "Error: No or invalid content received from LLM."
+            except Exception as e: # Catch errors from within the handler itself
+                logger.error(f"Agent {self.name}: Exception during LLM handler execution for provider '{provider_prefix}', model '{actual_model_name}': {e}", exc_info=True)
+                llm_response_data = {"error": f"Handler exception: {str(e)}"}
+        else:
+            logger.error(f"Agent {self.name}: No LLM handler found for provider prefix '{provider_prefix}'. Check LLM_PROVIDER_HANDLERS configuration.")
+            llm_response_data = {"error": f"No handler for provider '{provider_prefix}'"}
 
-        except openai.APIError as e:
+        # Extract content or error from the standardized handler response
+        if llm_response_data.get("error"):
             logger.error(
-                f"OpenAI API Error for agent {self.name} ({self.llm_model_identifier}): {str(e)}"
+                f"LLM call failed for agent {self.name} using {provider_prefix}/{actual_model_name}: {llm_response_data['error']}"
             )
-            return "Error: OpenAI API Error - " + str(e)
-        except Exception as e:
+            # Ensure the error message is a string for the return value
+            return str(llm_response_data["error"])
+
+        extracted_text_content = llm_response_data.get("content")
+
+        if isinstance(extracted_text_content, str):
+            self.remember({"role": "assistant", "content": extracted_text_content})
+            response_length = len(extracted_text_content)
+            logger.info(
+                f"Agent {self.name} received response from {provider_prefix}/{actual_model_name}. Length: {response_length}. Preview: {extracted_text_content[:100]}..."
+            )
+            final_content = extracted_text_content.strip()
+            logger.info(f"LLM call successful for agent {self.name} using {provider_prefix}/{actual_model_name}. Response length: {len(final_content)}.")
+            return final_content
+        else:
             logger.error(
-                f"General error in _get_llm_response for agent {self.name} ({self.llm_model_identifier}): {str(e)}"
+                f"LLM call failed for agent {self.name} using {provider_prefix}/{actual_model_name}: No string content received from handler. Handler response: {str(llm_response_data)[:200]}"
             )
-            return "Error: An unexpected error occurred - " + str(e)
+            return "Error: No or invalid content received from LLM handler."
 
     def run(
         self, task_description: str, context: Optional[List[Dict[str, Any]]] = None
     ) -> str:
+        logger.info(f"Agent {self.name} starting task: {task_description[:100]}...")
         self.task_history.append({"task": task_description})
         return self._get_llm_response(task_description)
 
@@ -624,17 +668,18 @@ class Agent:
                     pass
             else:
                 logger.warning(
-                    f"No confidence score found in JudgeAgent output: {evaluation_text[:100]}..." if isinstance(evaluation_text, str) else "No confidence score found."
+                    f"No confidence score found in JudgeAgent output for agent {self.name}, task '{task[:50]}...'. Raw output: {evaluation_text[:100]}..." if isinstance(evaluation_text, str) else "No confidence score found."
                 )
 
+            logger.info(f"Evaluation completed for agent {self.name}, task '{task[:50]}...'. Score: {confidence_score:.3f}.")
             return {"confidence_score": confidence_score, "feedback": evaluation_text if isinstance(evaluation_text, str) else "Evaluation error occurred."}
 
         except Exception as e:
             logger.error(
-                f"Error evaluating output with JudgeAgent ({judge_model_identifier}): {e}"
+                f"Error evaluating output with JudgeAgent ({judge_model_identifier}) for agent {self.name}, task '{task[:50]}...': {e}", exc_info=True
             )
             return {
-                "confidence_score": 0.5,
+                "confidence_score": 0.5, # Default score on error
                 "feedback": f"Error in evaluation: {str(e)}",
             }
 
@@ -648,8 +693,9 @@ class Swarm:
         self.meta_agents: Dict[str, Agent] = {}
         self.context_variables: Dict[str, Any] = {}
         self.global_memory: List[Dict[str, Any]] = []
+        # self.cursor attribute is removed. Cursors will be method-scoped.
         self._init_db() # Ensures tables are created if they don't exist
-        self.knowledge_base = KnowledgeBase(connection=self.db_connection)
+        self.knowledge_base = KnowledgeBase(connection=self.db_connection) # KnowledgeBase manages its own cursors
         self._initialize_essential_agents() # Load/create initial agents
 
     def _init_db(self):
@@ -657,10 +703,10 @@ class Swarm:
             logger.error("Database connection is not initialized for Swarm._init_db")
             raise ConnectionError("Database connection not initialized")
         
-        self.cursor = self.db_connection.cursor() # Ensure cursor is from self.db_connection
+        cursor = self.db_connection.cursor() # Use a local cursor
         
         # Ensure 'agents' table exists
-        self.cursor.execute(
+        cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS agents (
                 name TEXT PRIMARY KEY,
@@ -672,7 +718,7 @@ class Swarm:
         """
         )
         # Ensure 'tasks' table exists with new fields
-        self.cursor.execute(
+        cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS tasks (
                 task_id TEXT PRIMARY KEY,
@@ -690,24 +736,24 @@ class Swarm:
         )
 
         # Schema migration for existing 'tasks' table
-        self.cursor.execute("PRAGMA table_info(tasks)")
-        columns = [info[1] for info in self.cursor.fetchall()]
+        cursor.execute("PRAGMA table_info(tasks)")
+        columns = [info[1] for info in cursor.fetchall()]
 
         if "parent_task_id" not in columns:
             logger.info("Migrating 'tasks' table: Adding column 'parent_task_id'")
-            self.cursor.execute("ALTER TABLE tasks ADD COLUMN parent_task_id TEXT")
+            cursor.execute("ALTER TABLE tasks ADD COLUMN parent_task_id TEXT")
         if "is_subtask" not in columns:
             logger.info("Migrating 'tasks' table: Adding column 'is_subtask'")
-            self.cursor.execute("ALTER TABLE tasks ADD COLUMN is_subtask BOOLEAN DEFAULT 0")
+            cursor.execute("ALTER TABLE tasks ADD COLUMN is_subtask BOOLEAN DEFAULT 0")
         if "assigned_agent_name" not in columns:
             logger.info("Migrating 'tasks' table: Adding column 'assigned_agent_name'")
-            self.cursor.execute("ALTER TABLE tasks ADD COLUMN assigned_agent_name TEXT")
+            cursor.execute("ALTER TABLE tasks ADD COLUMN assigned_agent_name TEXT")
 
         # Add index for parent_task_id for faster querying (now columns are guaranteed to exist)
-        self.cursor.execute(
+        cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_parent_task_id ON tasks(parent_task_id)"
         )
-        self.db_connection.commit()
+        self.db_connection.commit() # Commit changes made with the local cursor
         logger.info("Swarm database initialized: 'agents' and 'tasks' tables ensured with new fields.")
 
     def _initialize_essential_agents(self):
@@ -836,17 +882,44 @@ class Swarm:
         else:
             self.agents[name] = agent
 
-        self.knowledge_base.cursor.execute(
-            """
-            INSERT OR REPLACE INTO agents 
-            (name, instructions, tier, creation_time, task_count, success_rate, last_active)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-            (name, instructions, agent_type, agent.creation_time, 0, 0.0, None),
-        )
-        if self.knowledge_base.conn:
-            self.knowledge_base.conn.commit()
-        logger.info(f"Added {agent_type} agent: {name}")
+        # Use a local cursor for this specific database write operation
+        cursor = self.db_connection.cursor()
+        try:
+            # Ensure all columns from the 'agents' table schema in _init_db are covered.
+            # The schema was: name, instructions, agent_type, llm_model_identifier, functions_json
+            # The old INSERT was: name, instructions, tier (agent_type), creation_time, task_count, success_rate, last_active
+            # This suggests the table schema used by add_agent was different from _init_db or incomplete.
+            # Assuming the schema from _init_db is the source of truth:
+            # (name, instructions, agent_type, llm_model_identifier, functions_json)
+            # And agent stats (task_count, success_rate, last_active, creation_time) might be separate or part of it.
+            # The INSERT OR REPLACE below matches the old logic more closely, using 'tier' for agent_type.
+            # Let's assume 'agents' table needs all these: name, instructions, agent_type (tier), llm_model_identifier, creation_time, task_count, success_rate, last_active.
+            # functions_json was in _init_db's CREATE TABLE for agents.
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO agents
+                (name, instructions, agent_type, llm_model_identifier, functions_json, creation_time, task_count, success_rate, last_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    name,
+                    instructions,
+                    agent_type, # Maps to 'tier' in some old logs/inserts
+                    llm_model_identifier,
+                    json.dumps(functions) if functions else None, # functions_json
+                    agent.creation_time,
+                    0, # task_count
+                    0.0, # success_rate
+                    None # last_active
+                )
+            )
+            self.db_connection.commit()
+            logger.info(f"Swarm: Added/Replaced {agent_type} agent '{name}' in DB.")
+        except sqlite3.Error as e:
+            logger.error(f"Swarm: SQLite error in add_agent for '{name}': {e}", exc_info=True)
+            # Not re-raising, as the agent is added in memory. DB error is logged.
+
+        logger.info(f"Swarm: Agent {name} ({agent_type}) added to in-memory dictionary.") # Log for in-memory
         return agent
 
     def run_agent(
@@ -857,15 +930,19 @@ class Swarm:
             logger.error(f"Agent {agent_name} not found")
             return {"error": f"Agent {agent_name} not found"}
 
-        logger.info(f"Running agent: {agent_name} on task: {task[:50]}...")
+        logger.info(f"Swarm.run_agent: Running agent '{agent_name}' on task: '{task[:50]}...'. Context (keys): {list(context.keys()) if context else 'None'}")
 
         full_context = self.context_variables.copy()
         if context:
             full_context.update(context)
 
+        logger.debug(f"Swarm.run_agent: Recalling experiences for agent '{agent_name}', task '{task[:50]}...'")
         relevant_experiences = self._get_relevant_experiences(task, agent_name, limit=3)
         experiences_text = self._format_experiences(relevant_experiences)
+        if relevant_experiences:
+            logger.info(f"Swarm.run_agent: Recalled {len(relevant_experiences)} experiences for agent '{agent_name}'.")
 
+        logger.debug(f"Swarm.run_agent: Recalling memories for agent '{agent_name}', query '{task[:50]}...'")
         relevant_memories = agent.recall(query=task, limit=3)
         memories_text = self._format_memories(relevant_memories)
 
@@ -877,11 +954,13 @@ class Swarm:
 
         if experiences_text:
             system_prompt += "Relevant past experiences:\n" + experiences_text + "\n\n"
-
         if memories_text:
+            logger.info(f"Swarm.run_agent: Recalled {len(relevant_memories)} memories for agent '{agent_name}'.")
             system_prompt += "Your relevant memories:\n" + memories_text + "\n\n"
 
         if full_context:
+            # Avoid logging full context if it's too verbose or contains sensitive data by default
+            logger.debug(f"Swarm.run_agent: Providing full_context with keys: {list(full_context.keys())} to agent '{agent_name}'.")
             system_prompt += (
                 "Context variables:\n" + json.dumps(full_context, indent=2) + "\n\n"
             )
@@ -892,45 +971,47 @@ class Swarm:
         )
 
         try:
-            response = agent.run(task)
+            response = agent.run(task) # Agent.run now logs the task execution
 
             output: str = response
 
-            agent.remember({"task": task, "content": output}, long_term=True)
+            logger.debug(f"Swarm.run_agent: Agent '{agent_name}' completed task. Output preview: {output[:100]}...")
 
-            evaluation = self._evaluate_output(agent_name, output, task)
+            logger.info(f"Swarm.run_agent: Saving experience for agent '{agent_name}' after task '{task[:50]}...'.")
+            agent.remember({"task": task, "content": output}, long_term=True) # This calls knowledge_base.save_experience
+
+            evaluation = self._evaluate_output(agent_name, output, task) # _evaluate_output now logs score
 
             # --- Update Agent Stats in DB ---
             try:
+                # Use a local cursor for updating agent stats
+                stat_cursor = self.db_connection.cursor()
                 # Fetch current stats
-                self.knowledge_base.cursor.execute(
+                stat_cursor.execute(
                     "SELECT task_count, success_rate FROM agents WHERE name = ?",
                     (agent_name,),
                 )
-                result = self.knowledge_base.cursor.fetchone()
+                result = stat_cursor.fetchone()
                 if result:
                     current_task_count, current_success_rate = result
                     current_task_count = current_task_count or 0  # Handle None
                     current_success_rate = current_success_rate or 0.0  # Handle None
                 else:
+                    # Agent might not be in DB if add_agent failed at DB level but agent was used.
                     logger.warning(
-                        f"Could not fetch stats for agent {agent_name} to update."
+                        f"Swarm.run_agent: Could not fetch existing stats for agent '{agent_name}' to update. Assuming new agent for stat purposes."
                     )
                     current_task_count, current_success_rate = 0, 0.0
 
                 # Calculate new stats
                 new_task_count = current_task_count + 1
-                evaluation_score = evaluation.get(
-                    "confidence_score", 0.0
-                )  # Default to 0 if missing
+                evaluation_score = evaluation.get("confidence_score", 0.0)
 
-                # Weighted average calculation
-                new_success_rate = (
-                    (current_success_rate * current_task_count) + evaluation_score
-                ) / new_task_count
+                new_success_rate = ((current_success_rate * current_task_count) + evaluation_score) / new_task_count if new_task_count > 0 else evaluation_score
+
 
                 # Update DB
-                self.knowledge_base.cursor.execute(
+                stat_cursor.execute(
                     "UPDATE agents SET task_count = ?, success_rate = ?, last_active = ? WHERE name = ?",
                     (
                         new_task_count,
@@ -939,12 +1020,10 @@ class Swarm:
                         agent_name,
                     ),
                 )
-                if self.knowledge_base.conn:
-                    self.knowledge_base.conn.commit()
+                self.db_connection.commit() # Commit the stat update
                 logger.debug(
-                    f"Updated stats for {agent_name}: tasks={new_task_count}, success_rate={new_success_rate:.2f}"
+                    f"Swarm.run_agent: Updated stats for agent '{agent_name}': tasks={new_task_count}, success_rate={new_success_rate:.3f}"
                 )
-
             except sqlite3.Error as db_err:
                 logger.error(
                     f"Database error updating agent stats for {agent_name}: {db_err}"
@@ -957,13 +1036,8 @@ class Swarm:
                 )
             # --- End Update Agent Stats ---
 
-            self.knowledge_base.save_experience(
-                task=task,
-                agent_name=agent_name,
-                content=output,
-                confidence_score=evaluation["confidence_score"],
-                feedback=evaluation["feedback"],
-            )
+            # self.knowledge_base.save_experience is called within agent.remember(long_term=True)
+            # So, no need to call it directly here again.
 
             self.global_memory.append(
                 {
@@ -1288,58 +1362,57 @@ class Swarm:
         agent = self._get_agent(agent_name)
 
         if not agent:
-            logger.error(f"[{subtask_id}] Agent '{agent_name}' not found for subtask execution.")
+            logger.error(f"[{subtask_id}] Swarm.execute_subtask: Agent '{agent_name}' not found.")
             error_message = f"Agent '{agent_name}' not found."
-            self.cursor.execute(
-                "UPDATE tasks SET status = ?, error_message = ?, updated_at = ? WHERE task_id = ?",
-                ("failed", error_message, datetime.datetime.now().isoformat(), subtask_id)
-            )
-            self.db_connection.commit()
+            cursor = self.db_connection.cursor() # Local cursor
+            try:
+                cursor.execute(
+                    "UPDATE tasks SET status = ?, error_message = ?, updated_at = ? WHERE task_id = ?",
+                    ("failed", error_message, datetime.datetime.now().isoformat(), subtask_id)
+                )
+                self.db_connection.commit()
+            except sqlite3.Error as db_err:
+                logger.error(f"Swarm: DB error in execute_subtask updating task {subtask_id} to failed (agent not found): {db_err}", exc_info=True)
             return {"error": error_message, "subtask_id": subtask_id}
 
         try:
-            # Assuming the core work of a subtask agent is to process the description (e.g., via LLM)
-            # We'll use _get_llm_response for now, as it's a common method for LLM-based agents.
-            # If agents have a more general 'execute' or 'run_task' method, that could be used.
-            # For non-LLM agents, this would need to be adapted.
+            # Agent._get_llm_response returns a string (content or error message)
+            llm_output_or_error = agent._get_llm_response(task_description)
+            logger.info(f"[{subtask_id}] Swarm.execute_subtask: LLM call by '{agent_name}' completed. Output preview: {llm_output_or_error[:100]}...")
             
-            # Construct a prompt that is suitable for a direct task, if necessary.
-            # For now, let's assume task_description is already well-formed for the agent.
-            # If the agent has specific prompting needs, this might be where it's adapted.
-            # Example: prompt = f"You are {agent.name}. Your task is: {task_description}"
-            # result_data = agent._get_llm_response(prompt)
-            
-            result_data = agent._get_llm_response(task_description) # Direct call for now
-
-            logger.info(f"[{subtask_id}] Subtask executed by '{agent_name}'. Result: {str(result_data)[:100]}...")
-            
-            # Determine if the result_data itself indicates an error from the agent
-            if isinstance(result_data, dict) and result_data.get("error"):
-                error_from_agent = str(result_data.get("error"))
-                logger.error(f"[{subtask_id}] Agent '{agent_name}' reported an error: {error_from_agent}")
-                self.cursor.execute(
+            cursor = self.db_connection.cursor() # Local cursor for this transaction
+            if llm_output_or_error.startswith("Error:"):
+                error_from_agent = llm_output_or_error
+                logger.error(f"[{subtask_id}] Swarm.execute_subtask: Agent '{agent_name}' LLM call resulted in an error: {error_from_agent}")
+                cursor.execute(
                     "UPDATE tasks SET status = ?, result = ?, error_message = ?, updated_at = ? WHERE task_id = ?",
-                    ("failed", json.dumps(result_data), error_from_agent, datetime.datetime.now().isoformat(), subtask_id)
+                    ("failed", json.dumps({"output": llm_output_or_error}), error_from_agent, datetime.datetime.now().isoformat(), subtask_id)
                 )
-                final_status = {"error": error_from_agent, "subtask_id": subtask_id, "output": result_data}
+                final_status = {"error": error_from_agent, "subtask_id": subtask_id, "output": llm_output_or_error}
             else:
-                self.cursor.execute(
+                # Success case
+                cursor.execute(
                     "UPDATE tasks SET status = ?, result = ?, updated_at = ? WHERE task_id = ?",
-                    ("completed", json.dumps(result_data), datetime.datetime.now().isoformat(), subtask_id)
+                    ("completed", json.dumps({"output": llm_output_or_error}), datetime.datetime.now().isoformat(), subtask_id)
                 )
-                final_status = {"success": True, "subtask_id": subtask_id, "output": result_data}
+                final_status = {"success": True, "subtask_id": subtask_id, "output": llm_output_or_error}
             
             self.db_connection.commit()
             return final_status
 
-        except Exception as e:
-            logger.error(f"[{subtask_id}] Error during subtask execution by '{agent_name}': {e}", exc_info=True)
-            error_message = f"Execution error by agent '{agent_name}': {str(e)}"
-            self.cursor.execute(
-                "UPDATE tasks SET status = ?, error_message = ?, updated_at = ? WHERE task_id = ?",
-                ("failed", error_message, datetime.datetime.now().isoformat(), subtask_id)
-            )
-            self.db_connection.commit()
+        except Exception as e: # Catch any other unexpected error during the process
+            logger.error(f"[{subtask_id}] Swarm.execute_subtask: Outer error for agent '{agent_name}': {e}", exc_info=True)
+            error_message = f"Outer execution error by agent '{agent_name}': {str(e)}"
+            # Use a new local cursor for this specific error update
+            error_cursor = self.db_connection.cursor()
+            try:
+                error_cursor.execute(
+                    "UPDATE tasks SET status = ?, error_message = ?, updated_at = ? WHERE task_id = ?",
+                    ("failed", error_message, datetime.datetime.now().isoformat(), subtask_id)
+                )
+                self.db_connection.commit()
+            except sqlite3.Error as db_err:
+                logger.error(f"Swarm: DB error in execute_subtask attempting to mark task {subtask_id} as failed after outer exception: {db_err}", exc_info=True)
             return {"error": error_message, "subtask_id": subtask_id}
 
     def organize_task(self, task: str) -> Dict[str, Any]:
@@ -1570,18 +1643,19 @@ class Swarm:
     def _register_subtask(self, parent_task_id: str, subtask_description: str, assigned_agent_name: str) -> str:
         subtask_id = str(uuid.uuid4())
         now = datetime.datetime.now().isoformat()
+        cursor = self.db_connection.cursor() # Local cursor
         try:
-            logger.info(f"Registering subtask {subtask_id} for parent {parent_task_id}. Assigned to: {assigned_agent_name}")
-            self.cursor.execute(
+            logger.info(f"Swarm: Registering subtask {subtask_id} for parent {parent_task_id}. Assigned to: {assigned_agent_name}")
+            cursor.execute(
                 "INSERT INTO tasks (task_id, description, status, created_at, updated_at, parent_task_id, is_subtask, assigned_agent_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (subtask_id, subtask_description, "queued", now, now, parent_task_id, 1, assigned_agent_name), # is_subtask = 1 (True)
+                (subtask_id, subtask_description, "queued", now, now, parent_task_id, True, assigned_agent_name), # is_subtask = True
             )
             self.db_connection.commit()
-            logger.info(f"Subtask {subtask_id} registered successfully.")
+            logger.info(f"Swarm: Subtask {subtask_id} registered successfully.")
             return subtask_id
         except sqlite3.Error as e:
-            logger.error(f"Database error registering subtask: {e}")
-            return ""
+            logger.error(f"Swarm: Database error in _register_subtask for parent {parent_task_id}, subtask {subtask_id}: {e}", exc_info=True)
+            return "" # Indicates failure
 
     def run(self, task_description: str, task_id: str) -> Dict[str, Any]:
         """
@@ -1603,12 +1677,16 @@ class Swarm:
         )
         organizer = self.meta_agents.get("OrganizerAgent")
         if not organizer:
-            logger.error(f"[{parent_task_id}] OrganizerAgent not found. Parent task {parent_task_id} will be marked as failed.")
-            self.cursor.execute(
-                "UPDATE tasks SET status = ?, error_message = ?, updated_at = ? WHERE task_id = ?",
-                ("failed", "OrganizerAgent not found for decomposition", datetime.datetime.now().isoformat(), parent_task_id),
-            )
-            self.db_connection.commit()
+            logger.error(f"[{parent_task_id}] Swarm.organize_task_for_supervision: OrganizerAgent not found. Parent task {parent_task_id} will be marked as failed.")
+            cursor = self.db_connection.cursor() # Local cursor
+            try:
+                cursor.execute(
+                    "UPDATE tasks SET status = ?, error_message = ?, updated_at = ? WHERE task_id = ?",
+                    ("failed", "OrganizerAgent not found for decomposition", datetime.datetime.now().isoformat(), parent_task_id),
+                )
+                self.db_connection.commit()
+            except sqlite3.Error as db_err:
+                logger.error(f"Swarm: DB error in organize_task_for_supervision updating task {parent_task_id} to failed (Organizer not found): {db_err}", exc_info=True)
             return {"error": "OrganizerAgent not found"}
 
         # Construct a more detailed and prescriptive prompt for the OrganizerAgent
@@ -1806,13 +1884,22 @@ class Swarm:
                 logger.error(f"[{parent_task_id}] No subtasks were successfully registered. Task cannot proceed.")
                 raise ValueError("No subtasks registered from the plan")
 
-            # IMPORTANT: Update parent task status to 'awaiting_subtasks' instead of 'running'
-            self.cursor.execute(
-                "UPDATE tasks SET status = ?, updated_at = ? WHERE task_id = ?",
-                ("awaiting_subtasks", datetime.datetime.now().isoformat(), parent_task_id),
-            )
-            self.db_connection.commit()
-            logger.info(f"[{parent_task_id}] Parent task status updated to 'awaiting_subtasks'. {len(subtask_ids)} subtasks created.")
+            # IMPORTANT: Update parent task status to 'awaiting_subtasks'
+            cursor = self.db_connection.cursor() # Local cursor for this update
+            try:
+                cursor.execute(
+                    "UPDATE tasks SET status = ?, updated_at = ? WHERE task_id = ?",
+                    ("awaiting_subtasks", datetime.datetime.now().isoformat(), parent_task_id),
+                )
+                self.db_connection.commit()
+                logger.info(f"[{parent_task_id}] Swarm.organize_task_for_supervision: Parent task status updated to 'awaiting_subtasks'. {len(subtask_ids)} subtasks created.")
+            except sqlite3.Error as db_err:
+                 logger.error(f"Swarm: DB error in organize_task_for_supervision updating task {parent_task_id} to awaiting_subtasks: {db_err}", exc_info=True)
+                 # This is tricky, subtasks are registered but parent failed to update.
+                 # For now, log and proceed, supervisor might pick it up or it might need manual fix.
+                 # Depending on desired atomicity, might need more complex rollback of subtask registration.
+                 # Returning the subtask_ids is still useful.
+                 return {"status": "error", "message": f"Failed to update parent task status, but subtasks registered: {db_err}", "subtask_ids": subtask_ids}
 
             return {
                 "status": "decomposed",
@@ -1826,13 +1913,13 @@ class Swarm:
                 f"[{parent_task_id}] Error organizing task for supervision: {e}", exc_info=True
             )
             # Update parent task to failed if decomposition fails critically
+            cursor = self.db_connection.cursor() # Local cursor
             try:
-                self.cursor.execute(
+                cursor.execute(
                     "UPDATE tasks SET status = ?, error_message = ?, updated_at = ? WHERE task_id = ?",
                     ("failed", f"Failed to decompose task: {str(e)}", datetime.datetime.now().isoformat(), parent_task_id),
                 )
                 self.db_connection.commit()
-            except Exception as db_err:
-                logger.error(f"[{parent_task_id}] Additionally, DB error while marking task as failed: {db_err}")
-                
+            except sqlite3.Error as db_err: # More specific exception
+                logger.error(f"Swarm: DB error in organize_task_for_supervision marking task {parent_task_id} as failed after exception: {db_err}", exc_info=True)
             return {"status": "error", "message": f"Failed to organize task: {str(e)}"}

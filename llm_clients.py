@@ -43,30 +43,57 @@ def call_ollama_chat(
         payload["options"] = options
 
     logger.info(
-        f"Sending request to Ollama model: {model_name} with {len(messages)} messages."
+        f"Sending request to Ollama model: {model_name} with {len(messages)} messages. Options: {options}"
     )
+    response = None  # Initialize response to None
     try:
-        response = requests.post(f"{OLLAMA_BASE_URL}/chat", json=payload, timeout=60.0)
-        response.raise_for_status()
-        # If stream is False, Ollama returns a single JSON object
-        # If stream is True, it returns a stream of JSON objects separated by newlines
-        # For simplicity with stream=False, we parse directly.
-        # For streaming, this would need to be handled differently (iter_lines).
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error calling Ollama chat API for model {model_name}: {e}")
+        response = requests.post(f"{OLLAMA_BASE_URL}/chat", json=payload, timeout=60.0) # Standard timeout 60s
+        response.raise_for_status()  # Raises HTTPError for 4XX/5XX responses
+
+        # Attempt to parse JSON
+        try:
+            ollama_response = response.json()
+        except json.JSONDecodeError as jd_err:
+            logger.error(
+                f"Ollama JSONDecodeError for model {model_name}: {jd_err}. Status: {response.status_code if response else 'N/A'}. Response text (first 500 chars): '{response.text[:500] if response else ''}'"
+            )
+            return {"error": f"JSON decode error: {jd_err}", "status_code": response.status_code if response else None, "content": response.text if response else None}
+
+        # Check response structure
+        if not isinstance(ollama_response, dict) or ollama_response.get("message") is None:
+            logger.warning(
+                f"Ollama response for model {model_name} missing 'message' field or is not a dict. Response: {str(ollama_response)[:500]}"
+            )
+            # Return the response as is, but add an error key for easier upstream detection
+            if isinstance(ollama_response, dict):
+                 ollama_response["error"] = "Unexpected response structure: 'message' field missing or invalid."
+                 return ollama_response
+            return {"error": "Unexpected response structure", "details": str(ollama_response)[:500]}
+
+        # Specific check for message content being a dict (as expected by current consumers)
+        if not isinstance(ollama_response.get("message"), dict):
+            logger.warning(
+                f"Ollama response 'message' field is not a dictionary for model {model_name}. Message: {str(ollama_response.get('message'))[:200]}"
+            )
+            # Modify the response to include an error, or return a new error dict
+            ollama_response["error"] = "Unexpected 'message' field type: should be a dictionary."
+            return ollama_response
+
+        return ollama_response
+
+    except requests.exceptions.Timeout as t_err:
+        logger.error(f"Ollama request timed out for model {model_name}: {t_err}")
+        return {"error": f"Request timed out: {t_err}"}
+    except requests.exceptions.RequestException as req_err:
+        status_code = response.status_code if response is not None else "N/A"
+        content_preview = response.content[:500].decode('utf-8', errors='replace') if response is not None and response.content else "No content"
         logger.error(
-            f"Response content: {response.content if 'response' in locals() else 'No response object'}"
+            f"Ollama RequestException for model {model_name}: {req_err}. Status: {status_code}. Response content (first 500 bytes): '{content_preview}'"
         )
-        return None
-    except json.JSONDecodeError as e:
-        logger.error(
-            f"Error decoding JSON response from Ollama for model {model_name}: {e}"
-        )
-        logger.error(
-            f"Response content: {response.content if 'response' in locals() else 'No response object'}"
-        )
-        return None
+        return {"error": f"RequestException: {req_err}", "status_code": status_code, "content_preview": content_preview}
+    except Exception as e: # Catch-all for any other unexpected errors
+        logger.error(f"Unexpected error in call_ollama_chat for model {model_name}: {e}", exc_info=True)
+        return {"error": f"Unexpected error: {str(e)}"}
 
 
 def call_xai_chat(
@@ -113,29 +140,72 @@ def call_xai_chat(
     # We are not streaming here for simplicity in this function.
 
     logger.info(
-        f"Sending request to X.AI model: {model_name} with {len(messages)} messages via requests."
+        f"Sending request to X.AI model: {model_name} with {len(messages)} messages. Temp: {temperature}, MaxTokens: {max_tokens}."
     )
     request_url = f"{base_url}/chat/completions"
+    response = None # Initialize response to None
 
     try:
-        response = requests.post(request_url, headers=headers, json=payload, timeout=60.0)
+        response = requests.post(request_url, headers=headers, json=payload, timeout=60.0) # Standard timeout 60s
         response.raise_for_status()  # Raise an exception for HTTP errors (4xx or 5xx)
-        return response.json()  # Parse JSON response
-    except requests.exceptions.Timeout:
-        logger.error(f"Timeout error calling X.AI API for model {model_name} at {request_url}")
-        return None
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error calling X.AI API for model {model_name} at {request_url}: {e}")
-        if 'response' in locals() and response is not None:
-            logger.error(f"Response content: {response.content}")
-        return None
-    except json.JSONDecodeError as e:
+
+        try:
+            xai_response = response.json()
+        except json.JSONDecodeError as jd_err:
+            logger.error(
+                f"X.AI JSONDecodeError for model {model_name} at {request_url}: {jd_err}. Status: {response.status_code if response else 'N/A'}. Response text (first 500 chars): '{response.text[:500] if response else ''}'"
+            )
+            return {"error": f"JSON decode error: {jd_err}", "status_code": response.status_code if response else None, "content": response.text if response else None}
+
+        # Check response structure - X.AI specific
+        if not isinstance(xai_response, dict) or not xai_response.get("choices"):
+            logger.warning(
+                f"X.AI response for model {model_name} missing 'choices' field or is not a dict. Response: {str(xai_response)[:500]}"
+            )
+            if isinstance(xai_response, dict):
+                xai_response["error"] = "Unexpected response structure: 'choices' field missing or invalid."
+                return xai_response
+            return {"error": "Unexpected response structure", "details": str(xai_response)[:500]}
+
+        if not isinstance(xai_response["choices"], list) or len(xai_response["choices"]) == 0:
+            logger.warning(
+                f"X.AI response 'choices' field is not a list or is empty for model {model_name}. Response: {str(xai_response)[:500]}"
+            )
+            xai_response["error"] = "Unexpected response structure: 'choices' field is not a list or is empty."
+            return xai_response
+
+        first_choice = xai_response["choices"][0]
+        if not isinstance(first_choice, dict) or first_choice.get("message") is None:
+            logger.warning(
+                f"X.AI response first choice missing 'message' field for model {model_name}. Choice: {str(first_choice)[:200]}"
+            )
+            xai_response["error"] = "Unexpected response structure: first choice missing 'message' field."
+            return xai_response
+
+        message_content = first_choice["message"].get("content")
+        if message_content is None: # Allow empty string, but not None
+            logger.warning(
+                f"X.AI response message missing 'content' for model {model_name}. Message: {str(first_choice['message'])[:200]}"
+            )
+            xai_response["error"] = "Unexpected response structure: message missing 'content'."
+            return xai_response
+
+        return xai_response
+
+    except requests.exceptions.Timeout as t_err:
+        logger.error(f"X.AI request timed out for model {model_name} at {request_url}: {t_err}")
+        return {"error": f"Request timed out: {t_err}"}
+    except requests.exceptions.RequestException as req_err:
+        status_code = response.status_code if response is not None else "N/A"
+        # API Key is not in payload or response.content, so logging snippet is okay.
+        content_preview = response.content[:500].decode('utf-8', errors='replace') if response is not None and response.content else "No content"
         logger.error(
-            f"Error decoding JSON response from X.AI for model {model_name} at {request_url}: {e}"
+            f"X.AI RequestException for model {model_name} at {request_url}: {req_err}. Status: {status_code}. Response (first 500 bytes): '{content_preview}'"
         )
-        if 'response' in locals() and response is not None:
-            logger.error(f"Response content: {response.content}")
-        return None
+        return {"error": f"RequestException: {req_err}", "status_code": status_code, "content_preview": content_preview}
+    except Exception as e: # Catch-all for any other unexpected errors
+        logger.error(f"Unexpected error in call_xai_chat for model {model_name}: {e}", exc_info=True)
+        return {"error": f"Unexpected error: {str(e)}"}
 
 
 if __name__ == "__main__":

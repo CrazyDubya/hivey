@@ -101,7 +101,7 @@ async def get_api_key(
     if api_key_header == EXPECTED_API_KEY:
         return api_key_header
     else:
-        logger.warning(f"Invalid API Key received: {api_key_header}")
+        logger.warning("Invalid API Key received.")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Could not validate credentials",
@@ -275,6 +275,12 @@ def update_task_status(
 ) -> None:
     """Updates the status and result/error of a task."""
     now = datetime.now().isoformat()
+
+    current_status_val = "unknown"
+    task_details_before_update = get_task_status(task_id) # Fetch current state
+    if task_details_before_update:
+        current_status_val = task_details_before_update.get("status", "unknown")
+
     cursor = _get_db_cursor()
     try:
         cursor.execute(
@@ -283,9 +289,17 @@ def update_task_status(
         )
         if main_db_connection:
             main_db_connection.commit()
-        logger.info(f"Task {task_id} status updated to {status}.")
+        # Log the transition including result/error presence
+        log_message = f"Task {task_id} status transition: {current_status_val} -> {status}."
+        if result is not None:
+            # Avoid logging potentially large results; just indicate presence
+            log_message += " Result updated."
+        if error_message is not None:
+            # Log only a snippet of the error message to avoid overly long logs
+            log_message += f" Error message: \"{error_message[:100]}...\"" if len(error_message) > 100 else f" Error message: \"{error_message}\""
+        logger.info(log_message)
     except sqlite3.Error as e:
-        logger.error(f"Failed to update task status for {task_id}: {e}")
+        logger.error(f"Failed to update task status for {task_id} from {current_status_val} to {status}: {e}")
 
 
 def get_task_status(task_id: str) -> Optional[Dict[str, Any]]:
@@ -347,9 +361,14 @@ def get_all_tasks_summary() -> List[Dict[str, Any]]:
 def run_swarm_task(task_id: str, description: str) -> None:
     """The actual function that runs the swarm task in the background."""
     logger.info(f"[{task_id}] Background processing initiated for: {description[:50]}...")
-    # Initial status update to 'running' still makes sense.
+
+    # Fetch initial status to log transition
+    task_details_initial = get_task_status(task_id)
+    initial_status = task_details_initial.get("status", "unknown") if task_details_initial else "unknown"
+    # Log the transition before calling update_task_status, which will log the actual update
+    logger.info(f"[{task_id}] Preparing to transition task from {initial_status} -> running.")
     update_task_status(task_id, "running")
-    logger.info(f"[{task_id}] Status updated to running.")
+    # logger.info(f"[{task_id}] Status updated to running.") # This is redundant as update_task_status now logs the transition
 
     if not swarm_instance:
         logger.error(f"[{task_id}] Swarm instance not available.")
@@ -440,10 +459,10 @@ def process_pending_subtasks():
     """Process any subtasks that are in 'queued' status."""
     global swarm_instance, main_db_connection
     if not swarm_instance or not main_db_connection:
-        logger.debug("Supervisor: Swarm instance or DB connection not ready.")
+        logger.debug("Supervisor: Swarm instance or DB connection not ready for process_pending_subtasks.")
         return
 
-    logger.debug("Supervisor: Checking for pending subtasks...")
+    logger.debug("Supervisor: Checking for pending subtasks (status 'queued')...")
     db_cursor = _get_db_cursor()
 
     try:
@@ -453,20 +472,20 @@ def process_pending_subtasks():
         )
         pending_subtasks = db_cursor.fetchall()
     except sqlite3.Error as e:
-        logger.error(f"Supervisor: DB error fetching pending subtasks: {e}", exc_info=True)
+        logger.error(f"Supervisor: DB error fetching pending 'queued' subtasks: {e}", exc_info=True)
         return
 
     if not pending_subtasks:
-        logger.debug("Supervisor: No pending subtasks to process.")
+        logger.debug("Supervisor: No pending subtasks in 'queued' status found.")
         return
 
-    logger.info(f"Supervisor: Found {len(pending_subtasks)} pending subtasks to process.")
+    logger.info(f"Supervisor: Found {len(pending_subtasks)} pending subtasks in 'queued' status to process.")
     for subtask_row in pending_subtasks:
         subtask_id, subtask_description, assigned_agent_name = subtask_row
-        logger.info(f"Supervisor: Processing pending subtask {subtask_id} assigned to {assigned_agent_name}.")
+        logger.info(f"Supervisor: Initiating processing for pending subtask {subtask_id} ('{subtask_description[:30]}...') assigned to {assigned_agent_name}.")
 
         try:
-            # Update status to 'running' before execution
+            # update_task_status will log the transition from queued -> running
             update_task_status(subtask_id, "running")
             
             # Start a new thread to execute the subtask
@@ -488,10 +507,10 @@ def check_for_stalled_subtasks():
     """Check for subtasks that have been in the running state for too long and mark them as failed."""
     global main_db_connection
     if not main_db_connection:
-        logger.debug("Supervisor: DB connection not ready.")
+        logger.debug("Supervisor: DB connection not ready for check_for_stalled_subtasks.")
         return
         
-    logger.debug("Supervisor: Checking for stalled subtasks...")
+    logger.debug("Supervisor: Checking for stalled subtasks (status 'running' for too long)...")
     db_cursor = _get_db_cursor()
     
     # Define the timeout threshold (30 minutes)
@@ -515,44 +534,45 @@ def check_for_stalled_subtasks():
         return
     
     if not stalled_subtasks:
-        logger.debug("Supervisor: No stalled subtasks found.")
+        logger.debug(f"Supervisor: No subtasks found in 'running' state beyond the timeout threshold of {timeout_minutes} minutes.")
         return
     
-    logger.info(f"Supervisor: Found {len(stalled_subtasks)} stalled subtasks.")
+    logger.info(f"Supervisor: Found {len(stalled_subtasks)} potentially stalled subtasks (running longer than {timeout_minutes} minutes).")
     for subtask_row in stalled_subtasks:
         subtask_id, subtask_description, assigned_agent_name, updated_at = subtask_row
-        logger.warning(f"Supervisor: Found stalled subtask {subtask_id} assigned to {assigned_agent_name}. Last updated: {updated_at}")
+        logger.warning(f"Supervisor: Stalled subtask {subtask_id} ('{subtask_description[:30]}...') assigned to {assigned_agent_name}. Last updated: {updated_at}. Marking as failed due to timeout.")
         
-        # Mark the subtask as failed
+        # update_task_status will log the transition from running -> failed
         error_message = f"Subtask timed out after {timeout_minutes} minutes of inactivity."
         update_task_status(subtask_id, "failed", error_message=error_message)
-        logger.info(f"Supervisor: Marked stalled subtask {subtask_id} as failed due to timeout.")
+        # logger.info(f"Supervisor: Marked stalled subtask {subtask_id} as failed due to timeout.") # Redundant, update_task_status logs
 
 
 def check_and_collate_supervised_tasks():
     global swarm_instance, main_db_connection
     if not swarm_instance or not main_db_connection:
-        logger.debug("Supervisor: Swarm instance or DB connection not ready.")
+        logger.debug("Supervisor: Swarm instance or DB connection not ready for check_and_collate_supervised_tasks.")
         return
 
-    logger.debug("Supervisor: Checking for tasks awaiting subtask completion...")
+    logger.debug("Supervisor: Checking for parent tasks in 'awaiting_subtasks' status...")
     db_cursor = _get_db_cursor()
 
     try:
         db_cursor.execute("SELECT task_id, description FROM tasks WHERE status = 'awaiting_subtasks' AND is_subtask = 0")
         parent_tasks_awaiting = db_cursor.fetchall()
     except sqlite3.Error as e:
-        logger.error(f"Supervisor: DB error fetching parent tasks: {e}", exc_info=True)
+        logger.error(f"Supervisor: DB error fetching parent tasks in 'awaiting_subtasks': {e}", exc_info=True)
         return
 
     if not parent_tasks_awaiting:
-        logger.debug("Supervisor: No tasks currently awaiting subtask completion.")
+        logger.debug("Supervisor: No parent tasks found in 'awaiting_subtasks' status.")
         return
 
+    logger.info(f"Supervisor: Found {len(parent_tasks_awaiting)} parent tasks in 'awaiting_subtasks' status to check for collation.")
     for parent_task_row in parent_tasks_awaiting:
         parent_task_id = parent_task_row[0]
         parent_task_description = parent_task_row[1]
-        logger.info(f"Supervisor: Checking parent task {parent_task_id} ('{parent_task_description[:50]}...')")
+        logger.info(f"Supervisor: Checking subtasks for parent task {parent_task_id} ('{parent_task_description[:30]}...').")
 
         try:
             db_cursor.execute(
@@ -653,6 +673,7 @@ def check_and_collate_supervised_tasks():
 # --- Core API Endpoints ---
 @app.post("/tasks", response_model=TaskResponse, dependencies=[Security(get_api_key)])
 async def submit_task(request: TaskRequest, background_tasks: BackgroundTasks) -> TaskResponse:
+    logger.info("Endpoint submit_task called.")
     logger.info(f"submit_task entered. Request description (first 50 chars): {request.task_description[:50]}...")
     task_id = str(uuid.uuid4())
     logger.info(f"Generated task_id: {task_id} for request: {request.task_description[:50]}...")
@@ -666,11 +687,13 @@ async def submit_task(request: TaskRequest, background_tasks: BackgroundTasks) -
         logger.info(f"Task {task_id} added to background_tasks.")
         
         logger.info(f"Returning TaskResponse for task_id: {task_id}")
+        logger.info("Endpoint submit_task finished.")
         return TaskResponse(task_id=task_id)
     except Exception as e:
         logger.error(f"UNEXPECTED ERROR IN SUBMIT_TASK for task_id {task_id if 'task_id' in locals() else 'UNKNOWN'}: {e}", exc_info=True)
         # Re-raise or return an error response if an exception occurs
         # Consider if you want to expose full error 'e' to client or a generic message
+        logger.info("Endpoint submit_task finished with error.")
         raise HTTPException(status_code=500, detail=f"Internal server error during task submission: {str(e)}")
 
 
@@ -681,14 +704,16 @@ async def submit_task(request: TaskRequest, background_tasks: BackgroundTasks) -
 )
 async def get_task_details(task_id: str) -> TaskStatusResponse:
     """Retrieves the status and result of a specific task (requires API Key)."""
+    logger.info("Endpoint get_task_details called.")
     logger.info(f"Received request for task status: {task_id}")
     task_data = get_task_status(task_id)
     if not task_data:
+        logger.info("Endpoint get_task_details finished with error.")
         raise HTTPException(status_code=404, detail="Task not found")
 
     # Convert the dictionary to the Pydantic model
     # Handle potential None for result/error_message if DB stores NULL
-    return TaskStatusResponse(
+    response = TaskStatusResponse(
         task_id=task_data["task_id"],
         description=task_data.get("description"), # Use .get for optional field
         status=task_data["status"],
@@ -700,6 +725,8 @@ async def get_task_details(task_id: str) -> TaskStatusResponse:
         is_subtask=task_data["is_subtask"],
         assigned_agent_name=task_data.get("assigned_agent_name"),
     )
+    logger.info("Endpoint get_task_details finished.")
+    return response
 
 @app.get(
     "/tasks/all/summary",
@@ -707,11 +734,15 @@ async def get_task_details(task_id: str) -> TaskStatusResponse:
     dependencies=[Security(get_api_key)],
 )
 async def get_all_tasks_list_summary() -> List[TaskStatusOnlyResponse]:
+    logger.info("Endpoint get_all_tasks_list_summary called.")
     tasks_data = get_all_tasks_summary()
     if not tasks_data:
         # Return empty list if no tasks, not an error, unless DB error specifically occurred and was logged
+        logger.info("Endpoint get_all_tasks_list_summary finished (no tasks).")
         return []
-    return [TaskStatusOnlyResponse(**task) for task in tasks_data]
+    response = [TaskStatusOnlyResponse(**task) for task in tasks_data]
+    logger.info("Endpoint get_all_tasks_list_summary finished.")
+    return response
 
 @app.get(
     "/tasks/{task_id}/summary",
@@ -719,10 +750,14 @@ async def get_all_tasks_list_summary() -> List[TaskStatusOnlyResponse]:
     dependencies=[Security(get_api_key)],
 )
 async def get_task_summary(task_id: str) -> TaskSummaryResponse: # Update return type hint
+    logger.info("Endpoint get_task_summary called.")
     task_data = get_task_status_summary(task_id)
     if not task_data:
+        logger.info("Endpoint get_task_summary finished with error (task not found).")
         raise HTTPException(status_code=404, detail="Task not found")
-    return TaskSummaryResponse(**task_data) # Map to new model
+    response = TaskSummaryResponse(**task_data) # Map to new model
+    logger.info("Endpoint get_task_summary finished.")
+    return response
 
 # Run the service using Uvicorn
 if __name__ == "__main__":
