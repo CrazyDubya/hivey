@@ -3,7 +3,7 @@ import requests
 import os
 import json
 import ast
-from typing import Optional
+from typing import Optional, List # Added List
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -188,6 +188,47 @@ def get_summary(task_id: str = typer.Argument(..., help="The ID of the task to g
             typer.secho(f"Error fetching task summary for {task_id}: {e}. Response: {e.response.text}", fg=typer.colors.RED)
     except requests.exceptions.RequestException as e:
         typer.secho(f"Request failed: {e}", fg=typer.colors.RED)
+
+@app.command()
+def list_agents():
+    """Lists all available agents in the swarm."""
+    api_key = get_api_key()
+    headers = {"X-API-Key": api_key}
+    console = Console()
+
+    try:
+        response = requests.get(f"{BASE_URL}/agents", headers=headers)
+        response.raise_for_status()
+        agents = response.json()
+
+        if not agents:
+            console.print("No agents found.", style="yellow")
+            return
+
+        table = Table(title="Available Agents", show_header=True, header_style="bold magenta")
+        table.add_column("Name", style="cyan", no_wrap=True)
+        table.add_column("Type", style="green")
+        table.add_column("LLM Model", style="blue")
+
+        for agent in agents:
+            table.add_row(
+                agent.get("name", "N/A"),
+                agent.get("agent_type", "N/A"),
+                agent.get("llm_model_identifier", "N/A"),
+            )
+
+        console.print(table)
+
+    except requests.exceptions.HTTPError as e:
+        typer.secho(f"Error listing agents: {e}", fg=typer.colors.RED)
+        if e.response is not None:
+            try:
+                typer.echo(f"Server response: {e.response.json()}")
+            except json.JSONDecodeError:
+                typer.echo(f"Server response: {e.response.text}")
+    except requests.exceptions.RequestException as e:
+        typer.secho(f"Request failed while listing agents: {e}", fg=typer.colors.RED)
+
 
 if __name__ == "__main__":
     app()

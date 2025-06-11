@@ -3,8 +3,7 @@ import logging
 import sqlite3
 import numpy as np
 from openai import OpenAI, OpenAIError
-
-DB_NAME = "swarmmind.db"
+from config import DB_NAME, EMBEDDING_MODEL # Import from config
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -114,7 +113,7 @@ except ValueError as e:
     raise
 
 
-def get_embedding(text, model="text-embedding-3-small"):
+def get_embedding(text: str, model: str = EMBEDDING_MODEL) -> Optional[List[float]]:
     """Generates an embedding for the given text using the specified OpenAI model."""
     if not text or not isinstance(text, str):
         logger.error("Invalid text input for embedding.")

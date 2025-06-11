@@ -31,8 +31,9 @@ from fastapi import FastAPI, Security, HTTPException, status, BackgroundTasks
 from fastapi.security.api_key import APIKeyHeader
 import uvicorn
 import uuid
-from pydantic import BaseModel
-from swarms import Swarm, DB_NAME
+from pydantic import BaseModel, constr
+from swarms import Swarm # DB_NAME will be imported from config
+from config import DB_NAME # Import DB_NAME from config
 from contextlib import asynccontextmanager
 import sys
 from logging.handlers import RotatingFileHandler
@@ -195,7 +196,7 @@ print("-----> /hello route DEFINED ON APP <-----")
 
 # --- Pydantic Models for API Data ---
 class TaskRequest(BaseModel):
-    task_description: str
+    task_description: constr(min_length=5, max_length=5000)
 
 
 class TaskResponse(BaseModel):
@@ -230,6 +231,13 @@ class TaskSummaryResponse(BaseModel):
     error_message: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+
+class AgentDetail(BaseModel):
+    name: str
+    agent_type: str # meta, supervisor, worker
+    llm_model_identifier: str
+    # instructions: Optional[str] = None # Potentially too verbose for a list
 
 
 # --- Database Helper Functions for Tasks ---
@@ -758,6 +766,43 @@ async def get_task_summary(task_id: str) -> TaskSummaryResponse: # Update return
     response = TaskSummaryResponse(**task_data) # Map to new model
     logger.info("Endpoint get_task_summary finished.")
     return response
+
+
+@app.get("/agents", response_model=List[AgentDetail], dependencies=[Security(get_api_key)])
+async def list_available_agents():
+    """Lists all available agents in the swarm."""
+    logger.info("Endpoint /agents called.")
+    if not swarm_instance:
+        logger.error("/agents: Swarm instance not available.")
+        raise HTTPException(status_code=503, detail="Swarm service not initialized or unavailable.")
+
+    agent_details_list = []
+    try:
+        # Helper to process a dictionary of agents
+        def process_agent_dict(agents_dict: Dict[str, Any], agent_type: str):
+            for agent_name, agent_obj in agents_dict.items():
+                agent_details_list.append(
+                    AgentDetail(
+                        name=agent_obj.name,
+                        agent_type=agent_obj.agent_type, # Assuming agent_obj has an agent_type attribute
+                        llm_model_identifier=agent_obj.llm_model_identifier,
+                    )
+                )
+
+        process_agent_dict(swarm_instance.agents, "worker")
+        process_agent_dict(swarm_instance.supervisors, "supervisor")
+        process_agent_dict(swarm_instance.meta_agents, "meta")
+
+        logger.info(f"/agents: Successfully retrieved {len(agent_details_list)} agents.")
+    except AttributeError as e:
+        logger.error(f"/agents: AttributeError accessing agent attributes: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error retrieving agent details.")
+    except Exception as e:
+        logger.error(f"/agents: Unexpected error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error.")
+
+    logger.info("Endpoint /agents finished.")
+    return agent_details_list
 
 # Run the service using Uvicorn
 if __name__ == "__main__":

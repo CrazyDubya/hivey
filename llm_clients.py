@@ -24,7 +24,7 @@ def get_ollama_local_tags() -> Optional[List[Dict[str, Any]]]:
 
 
 def call_ollama_chat(
-    model_name: str, messages: List[Dict[str, Any]], stream: bool = False, options: Dict[str, Any] = None
+    model_name: str, messages: List[Dict[str, Any]], stream: bool = False, options: Optional[Dict[str, Any]] = None
 ) -> Optional[Dict[str, Any]]:
     """
     Sends a chat completion request to the Ollama API.
