@@ -5,11 +5,9 @@ import os
 import json
 import re
 import datetime
-import inspect
-import threading
 import time
 import uuid
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass, field
 from openai.types.chat import (
@@ -1505,6 +1503,9 @@ class Swarm:
                         }
                     ]
                 }
+
+            # Initialize parsed_workflow to ensure it's always defined
+            parsed_workflow = parsed_workflow_fallback
 
             actual_steps = None
             if isinstance(parsed_workflow, dict):

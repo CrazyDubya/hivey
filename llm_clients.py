@@ -63,7 +63,7 @@ def call_ollama_chat(
     except requests.exceptions.RequestException as e:
         logger.error(f"Error calling Ollama chat API for model {model_name}: {e}")
         logger.error(
-            f"Response content: {response.content if 'response' in locals() else 'No response object'}"
+            f"Response content: {response.content if 'response' in locals() else 'No response'}"
         )
         return None
     except json.JSONDecodeError as e:

@@ -128,7 +128,7 @@ def periodic_supervisor_check_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup sequence
-    global swarm_instance, main_db_connection, shutdown_event
+    global swarm_instance, main_db_connection
     logger.info(
         "Lifespan: Initializing Swarm service... (API key should already be loaded)"
     )
@@ -193,6 +193,11 @@ print("-----> /hello route DEFINED ON APP <-----")
 # --- Pydantic Models for API Data ---
 class TaskRequest(BaseModel):
     task_description: str
+    
+    class Config:
+        str_strip_whitespace = True
+        str_min_length = 1
+        str_max_length = 10000
 
 
 class TaskResponse(BaseModel):
@@ -404,15 +409,15 @@ def run_swarm_task(task_id: str, description: str) -> None:
 
             # Call the new method for direct subtask execution
             # This method will be responsible for its own status updates upon completion/failure
-            subtask_result_dict = swarm_instance.execute_subtask(
+            result_dict = swarm_instance.execute_subtask(
                 agent_name=assigned_agent_name,
                 task_description=current_task_description,
                 subtask_id=task_id,
             )
             # execute_subtask should handle updating its own status internally.
             # For now, let's assume it returns a similar dict to organize_task/run for consistency if needed.
-            # Example: if subtask_result_dict.get("error"):
-            #    update_task_status(task_id, "failed", result=json.dumps(subtask_result_dict), error_message=subtask_result_dict["error"])
+            # Log the result for debugging
+            logger.info(f"Subtask execution result: {str(result_dict)[:100]}...")
             # else:
             #    update_task_status(task_id, "completed", result=json.dumps(subtask_result_dict))
             logger.info(

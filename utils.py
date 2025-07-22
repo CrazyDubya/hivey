@@ -92,26 +92,34 @@ def initialize_database():
             logger.info(f"Database connection to {db_path} closed.")
 
 
-# Initialize OpenAI client
-try:
-    # Ensure the API key is available
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-    if not openai_api_key:
-        logger.error("OPENAI_API_KEY environment variable not set.")
-        raise ValueError("OPENAI_API_KEY environment variable not set.")
+# Initialize OpenAI client lazily
+client = None
 
-    # Initialize client
-    client = OpenAI(api_key=openai_api_key)
-    logger.info("OpenAI client initialized successfully.")
 
-except OpenAIError as e:
-    logger.error(f"Failed to initialize OpenAI client: {e}")
-    # Depending on the application's needs, you might want to exit or handle this differently
-    raise
-except ValueError as e:
-    logger.error(e)
-    # Handle missing API key error appropriately
-    raise
+def get_openai_client():
+    """Get or initialize the OpenAI client."""
+    global client
+    if client is None:
+        try:
+            # Ensure the API key is available
+            openai_api_key = os.getenv("OPENAI_API_KEY")
+            if not openai_api_key:
+                logger.error("OPENAI_API_KEY environment variable not set.")
+                raise ValueError("OPENAI_API_KEY environment variable not set.")
+
+            # Initialize client
+            client = OpenAI(api_key=openai_api_key)
+            logger.info("OpenAI client initialized successfully.")
+
+        except OpenAIError as e:
+            logger.error(f"Failed to initialize OpenAI client: {e}")
+            # Depending on the application's needs, you might want to exit or handle this differently
+            raise
+        except ValueError as e:
+            logger.error(e)
+            # Handle missing API key error appropriately
+            raise
+    return client
 
 
 def get_embedding(text, model="text-embedding-3-small"):
@@ -121,6 +129,7 @@ def get_embedding(text, model="text-embedding-3-small"):
         return None
     try:
         text = text.replace("\n", " ")
+        client = get_openai_client()
         response = client.embeddings.create(input=[text], model=model)
         embedding = response.data[0].embedding
         # logger.debug(f"Generated embedding for text snippet: {text[:50]}...")
