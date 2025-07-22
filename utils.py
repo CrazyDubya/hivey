@@ -46,6 +46,18 @@ def initialize_database():
         )
         logger.info("'experiences' table checked/created.")
 
+        # Create indexes for performance optimization
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_experiences_agent_name ON experiences(agent_name)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_experiences_timestamp ON experiences(timestamp)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_experiences_task ON experiences(task)"
+        )
+        logger.info("Database indexes created/verified for experiences table.")
+
         # Create memories table
         cursor.execute(
             """
@@ -61,6 +73,18 @@ def initialize_database():
             """
         )
         logger.info("'memories' table checked/created.")
+
+        # Create indexes for memories table
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_agent_name ON memories(agent_name)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_timestamp ON memories(timestamp)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type)"
+        )
+        logger.info("Database indexes created/verified for memories table.")
 
         # Create tasks table
         cursor.execute(

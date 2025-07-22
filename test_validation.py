@@ -18,6 +18,27 @@ def test_imports():
         return False
     
     try:
+        import models
+        print("✓ models module imported successfully")
+    except Exception as e:
+        print(f"✗ models import failed: {e}")
+        return False
+    
+    try:
+        import error_handling
+        print("✓ error_handling module imported successfully")
+    except Exception as e:
+        print(f"✗ error_handling import failed: {e}")
+        return False
+    
+    try:
+        import async_llm_clients
+        print("✓ async_llm_clients module imported successfully")
+    except Exception as e:
+        print(f"✗ async_llm_clients import failed: {e}")
+        return False
+    
+    try:
         import utils
         print("✓ utils module imported successfully")
     except Exception as e:
