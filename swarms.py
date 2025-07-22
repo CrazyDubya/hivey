@@ -329,7 +329,7 @@ class Agent:
         self.agent_type = agent_type
         self.llm_model_identifier = llm_model_identifier
         self.knowledge_base = KnowledgeBase(connection=db_connection)
-        self.task_history: List[Dict[str, Any]] = [] 
+        self.task_history: List[Dict[str, Any]] = []
         self.creation_time = datetime.datetime.now().isoformat()
 
     def remember(self, info: Dict[str, Any], long_term: bool = False) -> None:
@@ -429,8 +429,8 @@ class Agent:
                 raw_response = call_ollama_chat(
                     model_name=self.llm_model_identifier.split("/", 1)[1],
                     messages=messages,
-                    options=model_params
-                ) 
+                    options=model_params,
+                )
                 if (
                     raw_response
                     and raw_response.get("message")
@@ -473,7 +473,11 @@ class Agent:
                     temperature=model_params.get("temperature", 0.7),
                     max_tokens=model_params.get("max_tokens", 1024),
                 )  # type: ignore[arg-type]
-                if completion.choices and completion.choices[0].message and isinstance(completion.choices[0].message.content, str):
+                if (
+                    completion.choices
+                    and completion.choices[0].message
+                    and isinstance(completion.choices[0].message.content, str)
+                ):
                     extracted_text_content = completion.choices[0].message.content
                 # else response_content remains None, addressing old L468 error.
 
@@ -484,14 +488,22 @@ class Agent:
                     f"Agent {self.name} received response: {extracted_text_content[:100]}..."
                 )
                 if isinstance(extracted_text_content, str):
-                    trimmed_content = extracted_text_content[:100] if len(extracted_text_content) > 100 else extracted_text_content
+                    trimmed_content = (
+                        extracted_text_content[:100]
+                        if len(extracted_text_content) > 100
+                        else extracted_text_content
+                    )
                 else:
                     trimmed_content = ""
                 extracted_text_content = trimmed_content
                 if isinstance(extracted_text_content, str):
                     extracted_text_content = extracted_text_content.strip()
                 # Ensure response_content is a string before returning
-                return str(extracted_text_content) if extracted_text_content is not None else ""
+                return (
+                    str(extracted_text_content)
+                    if extracted_text_content is not None
+                    else ""
+                )
             else:
                 logger.error(
                     f"Agent {self.name} received no content or non-string content from LLM ({self.llm_model_identifier})."
@@ -515,10 +527,10 @@ class Agent:
         self.task_history.append({"task": task_description})
         return self._get_llm_response(task_description)
 
-    def _evaluate_output(
-        self, task: str, output: str
-    ) -> Dict[str, Any]:
-        judge = self.swarm.meta_agents.get("JudgeAgent") if hasattr(self, 'swarm') else None
+    def _evaluate_output(self, task: str, output: str) -> Dict[str, Any]:
+        judge = (
+            self.swarm.meta_agents.get("JudgeAgent") if hasattr(self, "swarm") else None
+        )
         if not judge:
             logger.warning("JudgeAgent not found, cannot evaluate output.")
             return {
@@ -552,8 +564,10 @@ class Agent:
             if judge_model_identifier.startswith("ollama/"):
                 model_name = judge_model_identifier.split("/", 1)[1]
                 evaluation_text = call_ollama_chat(
-                    model_name=model_name, messages=messages, options={"temperature": 0.3}
-                ) 
+                    model_name=model_name,
+                    messages=messages,
+                    options={"temperature": 0.3},
+                )
                 if (
                     evaluation_text
                     and evaluation_text.get("message")
@@ -573,7 +587,7 @@ class Agent:
                 model_name = judge_model_identifier.split("/", 1)[1]
                 evaluation_text = call_xai_chat(
                     model_name=model_name, messages=messages, temperature=0.3
-                ) 
+                )
                 if (
                     evaluation_text
                     and evaluation_text.get("choices")
@@ -594,11 +608,15 @@ class Agent:
                     temperature=0.3,
                     max_tokens=500,
                 )  # type: ignore[arg-type]
-                if completion.choices and completion.choices[0].message and isinstance(completion.choices[0].message.content, str):
+                if (
+                    completion.choices
+                    and completion.choices[0].message
+                    and isinstance(completion.choices[0].message.content, str)
+                ):
                     evaluation_text = completion.choices[0].message.content
                 # else evaluation_text remains None, addressing old L587 error.
 
-            if not evaluation_text: # evaluation_text is str | None here
+            if not evaluation_text:  # evaluation_text is str | None here
                 logger.error(
                     f"JudgeAgent ({judge_model_identifier}) received no content."
                 )
@@ -609,14 +627,16 @@ class Agent:
 
             if isinstance(evaluation_text, str):
                 score_match = re.search(
-                    r"(?:confidence\s*score|score):?\s*(\d(?:\.\d+)?)", evaluation_text, re.IGNORECASE
-                ) 
+                    r"(?:confidence\s*score|score):?\s*(\d(?:\.\d+)?)",
+                    evaluation_text,
+                    re.IGNORECASE,
+                )
             else:
                 score_match = None
             if score_match:
                 try:
                     confidence_score = float(score_match.group(1))
-                    confidence_score = max(0.001, min(0.999, confidence_score)) 
+                    confidence_score = max(0.001, min(0.999, confidence_score))
                 except ValueError:
                     logger.warning(
                         f"Could not parse confidence score from: {score_match.group(1) if score_match else 'N/A'}"
@@ -624,10 +644,19 @@ class Agent:
                     pass
             else:
                 logger.warning(
-                    f"No confidence score found in JudgeAgent output: {evaluation_text[:100]}..." if isinstance(evaluation_text, str) else "No confidence score found."
+                    f"No confidence score found in JudgeAgent output: {evaluation_text[:100]}..."
+                    if isinstance(evaluation_text, str)
+                    else "No confidence score found."
                 )
 
-            return {"confidence_score": confidence_score, "feedback": evaluation_text if isinstance(evaluation_text, str) else "Evaluation error occurred."}
+            return {
+                "confidence_score": confidence_score,
+                "feedback": (
+                    evaluation_text
+                    if isinstance(evaluation_text, str)
+                    else "Evaluation error occurred."
+                ),
+            }
 
         except Exception as e:
             logger.error(
@@ -648,17 +677,19 @@ class Swarm:
         self.meta_agents: Dict[str, Agent] = {}
         self.context_variables: Dict[str, Any] = {}
         self.global_memory: List[Dict[str, Any]] = []
-        self._init_db() # Ensures tables are created if they don't exist
+        self._init_db()  # Ensures tables are created if they don't exist
         self.knowledge_base = KnowledgeBase(connection=self.db_connection)
-        self._initialize_essential_agents() # Load/create initial agents
+        self._initialize_essential_agents()  # Load/create initial agents
 
     def _init_db(self):
         if not self.db_connection:
             logger.error("Database connection is not initialized for Swarm._init_db")
             raise ConnectionError("Database connection not initialized")
-        
-        self.cursor = self.db_connection.cursor() # Ensure cursor is from self.db_connection
-        
+
+        self.cursor = (
+            self.db_connection.cursor()
+        )  # Ensure cursor is from self.db_connection
+
         # Ensure 'agents' table exists
         self.cursor.execute(
             """
@@ -698,7 +729,9 @@ class Swarm:
             self.cursor.execute("ALTER TABLE tasks ADD COLUMN parent_task_id TEXT")
         if "is_subtask" not in columns:
             logger.info("Migrating 'tasks' table: Adding column 'is_subtask'")
-            self.cursor.execute("ALTER TABLE tasks ADD COLUMN is_subtask BOOLEAN DEFAULT 0")
+            self.cursor.execute(
+                "ALTER TABLE tasks ADD COLUMN is_subtask BOOLEAN DEFAULT 0"
+            )
         if "assigned_agent_name" not in columns:
             logger.info("Migrating 'tasks' table: Adding column 'assigned_agent_name'")
             self.cursor.execute("ALTER TABLE tasks ADD COLUMN assigned_agent_name TEXT")
@@ -708,7 +741,9 @@ class Swarm:
             "CREATE INDEX IF NOT EXISTS idx_parent_task_id ON tasks(parent_task_id)"
         )
         self.db_connection.commit()
-        logger.info("Swarm database initialized: 'agents' and 'tasks' tables ensured with new fields.")
+        logger.info(
+            "Swarm database initialized: 'agents' and 'tasks' tables ensured with new fields."
+        )
 
     def _initialize_essential_agents(self):
         # Calls to self.add_agent will use self.knowledge_base.conn (shared) via Agent constructor
@@ -1034,8 +1069,10 @@ class Swarm:
             if judge_model_identifier.startswith("ollama/"):
                 model_name = judge_model_identifier.split("/", 1)[1]
                 evaluation_text = call_ollama_chat(
-                    model_name=model_name, messages=messages, options={"temperature": 0.3}
-                ) 
+                    model_name=model_name,
+                    messages=messages,
+                    options={"temperature": 0.3},
+                )
                 if (
                     evaluation_text
                     and evaluation_text.get("message")
@@ -1055,7 +1092,7 @@ class Swarm:
                 model_name = judge_model_identifier.split("/", 1)[1]
                 evaluation_text = call_xai_chat(
                     model_name=model_name, messages=messages, temperature=0.3
-                ) 
+                )
                 if (
                     evaluation_text
                     and evaluation_text.get("choices")
@@ -1076,11 +1113,15 @@ class Swarm:
                     temperature=0.3,
                     max_tokens=500,
                 )  # type: ignore[arg-type]
-                if completion.choices and completion.choices[0].message and isinstance(completion.choices[0].message.content, str):
+                if (
+                    completion.choices
+                    and completion.choices[0].message
+                    and isinstance(completion.choices[0].message.content, str)
+                ):
                     evaluation_text = completion.choices[0].message.content
                 # else evaluation_text remains None, addressing old L1041 error.
 
-            if not evaluation_text: # evaluation_text is str | None here
+            if not evaluation_text:  # evaluation_text is str | None here
                 logger.error(
                     f"JudgeAgent ({judge_model_identifier}) received no content."
                 )
@@ -1091,14 +1132,16 @@ class Swarm:
 
             if isinstance(evaluation_text, str):
                 score_match = re.search(
-                    r"(?:confidence\s*score|score):?\s*(\d(?:\.\d+)?)", evaluation_text, re.IGNORECASE
-                ) 
+                    r"(?:confidence\s*score|score):?\s*(\d(?:\.\d+)?)",
+                    evaluation_text,
+                    re.IGNORECASE,
+                )
             else:
                 score_match = None
             if score_match:
                 try:
                     confidence_score = float(score_match.group(1))
-                    confidence_score = max(0.001, min(0.999, confidence_score)) 
+                    confidence_score = max(0.001, min(0.999, confidence_score))
                 except ValueError:
                     logger.warning(
                         f"Could not parse confidence score from: {score_match.group(1) if score_match else 'N/A'}"
@@ -1106,10 +1149,19 @@ class Swarm:
                     pass
             else:
                 logger.warning(
-                    f"No confidence score found in JudgeAgent output: {evaluation_text[:100]}..." if isinstance(evaluation_text, str) else "No confidence score found."
+                    f"No confidence score found in JudgeAgent output: {evaluation_text[:100]}..."
+                    if isinstance(evaluation_text, str)
+                    else "No confidence score found."
                 )
 
-            return {"confidence_score": confidence_score, "feedback": evaluation_text if isinstance(evaluation_text, str) else "Evaluation error occurred."}
+            return {
+                "confidence_score": confidence_score,
+                "feedback": (
+                    evaluation_text
+                    if isinstance(evaluation_text, str)
+                    else "Evaluation error occurred."
+                ),
+            }
 
         except Exception as e:
             logger.error(
@@ -1152,7 +1204,7 @@ class Swarm:
 
         formatted = []
         for exp in experiences:
-            if isinstance(exp.get('content'), str):
+            if isinstance(exp.get("content"), str):
                 formatted.append(
                     f"Agent: {exp['agent_name']}\nTask: {exp['task']}\nOutput: {exp['content'][:100]}..."
                 )
@@ -1283,16 +1335,27 @@ class Swarm:
             "agent": new_agent.to_dict(),
         }
 
-    def execute_subtask(self, agent_name: str, task_description: str, subtask_id: str) -> Dict[str, Any]:
-        logger.info(f"[{subtask_id}] Executing subtask by agent '{agent_name}': {task_description[:50]}...")
+    def execute_subtask(
+        self, agent_name: str, task_description: str, subtask_id: str
+    ) -> Dict[str, Any]:
+        logger.info(
+            f"[{subtask_id}] Executing subtask by agent '{agent_name}': {task_description[:50]}..."
+        )
         agent = self._get_agent(agent_name)
 
         if not agent:
-            logger.error(f"[{subtask_id}] Agent '{agent_name}' not found for subtask execution.")
+            logger.error(
+                f"[{subtask_id}] Agent '{agent_name}' not found for subtask execution."
+            )
             error_message = f"Agent '{agent_name}' not found."
             self.cursor.execute(
                 "UPDATE tasks SET status = ?, error_message = ?, updated_at = ? WHERE task_id = ?",
-                ("failed", error_message, datetime.datetime.now().isoformat(), subtask_id)
+                (
+                    "failed",
+                    error_message,
+                    datetime.datetime.now().isoformat(),
+                    subtask_id,
+                ),
             )
             self.db_connection.commit()
             return {"error": error_message, "subtask_id": subtask_id}
@@ -1302,42 +1365,75 @@ class Swarm:
             # We'll use _get_llm_response for now, as it's a common method for LLM-based agents.
             # If agents have a more general 'execute' or 'run_task' method, that could be used.
             # For non-LLM agents, this would need to be adapted.
-            
+
             # Construct a prompt that is suitable for a direct task, if necessary.
             # For now, let's assume task_description is already well-formed for the agent.
             # If the agent has specific prompting needs, this might be where it's adapted.
             # Example: prompt = f"You are {agent.name}. Your task is: {task_description}"
             # result_data = agent._get_llm_response(prompt)
-            
-            result_data = agent._get_llm_response(task_description) # Direct call for now
 
-            logger.info(f"[{subtask_id}] Subtask executed by '{agent_name}'. Result: {str(result_data)[:100]}...")
-            
+            result_data = agent._get_llm_response(
+                task_description
+            )  # Direct call for now
+
+            logger.info(
+                f"[{subtask_id}] Subtask executed by '{agent_name}'. Result: {str(result_data)[:100]}..."
+            )
+
             # Determine if the result_data itself indicates an error from the agent
             if isinstance(result_data, dict) and result_data.get("error"):
                 error_from_agent = str(result_data.get("error"))
-                logger.error(f"[{subtask_id}] Agent '{agent_name}' reported an error: {error_from_agent}")
+                logger.error(
+                    f"[{subtask_id}] Agent '{agent_name}' reported an error: {error_from_agent}"
+                )
                 self.cursor.execute(
                     "UPDATE tasks SET status = ?, result = ?, error_message = ?, updated_at = ? WHERE task_id = ?",
-                    ("failed", json.dumps(result_data), error_from_agent, datetime.datetime.now().isoformat(), subtask_id)
+                    (
+                        "failed",
+                        json.dumps(result_data),
+                        error_from_agent,
+                        datetime.datetime.now().isoformat(),
+                        subtask_id,
+                    ),
                 )
-                final_status = {"error": error_from_agent, "subtask_id": subtask_id, "output": result_data}
+                final_status = {
+                    "error": error_from_agent,
+                    "subtask_id": subtask_id,
+                    "output": result_data,
+                }
             else:
                 self.cursor.execute(
                     "UPDATE tasks SET status = ?, result = ?, updated_at = ? WHERE task_id = ?",
-                    ("completed", json.dumps(result_data), datetime.datetime.now().isoformat(), subtask_id)
+                    (
+                        "completed",
+                        json.dumps(result_data),
+                        datetime.datetime.now().isoformat(),
+                        subtask_id,
+                    ),
                 )
-                final_status = {"success": True, "subtask_id": subtask_id, "output": result_data}
-            
+                final_status = {
+                    "success": True,
+                    "subtask_id": subtask_id,
+                    "output": result_data,
+                }
+
             self.db_connection.commit()
             return final_status
 
         except Exception as e:
-            logger.error(f"[{subtask_id}] Error during subtask execution by '{agent_name}': {e}", exc_info=True)
+            logger.error(
+                f"[{subtask_id}] Error during subtask execution by '{agent_name}': {e}",
+                exc_info=True,
+            )
             error_message = f"Execution error by agent '{agent_name}': {str(e)}"
             self.cursor.execute(
                 "UPDATE tasks SET status = ?, error_message = ?, updated_at = ? WHERE task_id = ?",
-                ("failed", error_message, datetime.datetime.now().isoformat(), subtask_id)
+                (
+                    "failed",
+                    error_message,
+                    datetime.datetime.now().isoformat(),
+                    subtask_id,
+                ),
             )
             self.db_connection.commit()
             return {"error": error_message, "subtask_id": subtask_id}
@@ -1367,9 +1463,13 @@ class Swarm:
         )
 
         try:
-            logger.info(f"[{self.__class__.__name__}] About to call OrganizerAgent ({organizer.llm_model_identifier}) _get_llm_response for task: {task[:50]}...")
+            logger.info(
+                f"[{self.__class__.__name__}] About to call OrganizerAgent ({organizer.llm_model_identifier}) _get_llm_response for task: {task[:50]}..."
+            )
             workflow_plan = organizer._get_llm_response(prompt)
-            logger.info(f"[{self.__class__.__name__}] OrganizerAgent call returned. Workflow plan received (first 100 chars): {str(workflow_plan)[:100]}")
+            logger.info(
+                f"[{self.__class__.__name__}] OrganizerAgent call returned. Workflow plan received (first 100 chars): {str(workflow_plan)[:100]}"
+            )
 
             # Handle potential non-string responses from _get_llm_response if necessary
             if not isinstance(workflow_plan, str):
@@ -1409,9 +1509,13 @@ class Swarm:
             actual_steps = None
             if isinstance(parsed_workflow, dict):
                 # Try common keys where the list of steps might be nested
-                if "subtasks" in parsed_workflow and isinstance(parsed_workflow["subtasks"], list):
+                if "subtasks" in parsed_workflow and isinstance(
+                    parsed_workflow["subtasks"], list
+                ):
                     actual_steps = parsed_workflow["subtasks"]
-                elif "steps" in parsed_workflow and isinstance(parsed_workflow["steps"], list):
+                elif "steps" in parsed_workflow and isinstance(
+                    parsed_workflow["steps"], list
+                ):
                     actual_steps = parsed_workflow["steps"]
                 elif "workflow" in parsed_workflow:
                     # If 'workflow' key exists, check if IT is the list or contains the list
@@ -1567,14 +1671,27 @@ class Swarm:
             logger.error(f"Error combining results: {e}")
             return {"error": str(e), "method": "error_in_combination"}
 
-    def _register_subtask(self, parent_task_id: str, subtask_description: str, assigned_agent_name: str) -> str:
+    def _register_subtask(
+        self, parent_task_id: str, subtask_description: str, assigned_agent_name: str
+    ) -> str:
         subtask_id = str(uuid.uuid4())
         now = datetime.datetime.now().isoformat()
         try:
-            logger.info(f"Registering subtask {subtask_id} for parent {parent_task_id}. Assigned to: {assigned_agent_name}")
+            logger.info(
+                f"Registering subtask {subtask_id} for parent {parent_task_id}. Assigned to: {assigned_agent_name}"
+            )
             self.cursor.execute(
                 "INSERT INTO tasks (task_id, description, status, created_at, updated_at, parent_task_id, is_subtask, assigned_agent_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (subtask_id, subtask_description, "queued", now, now, parent_task_id, 1, assigned_agent_name), # is_subtask = 1 (True)
+                (
+                    subtask_id,
+                    subtask_description,
+                    "queued",
+                    now,
+                    now,
+                    parent_task_id,
+                    1,
+                    assigned_agent_name,
+                ),  # is_subtask = 1 (True)
             )
             self.db_connection.commit()
             logger.info(f"Subtask {subtask_id} registered successfully.")
@@ -1585,15 +1702,21 @@ class Swarm:
 
     def run(self, task_description: str, task_id: str) -> Dict[str, Any]:
         """
-        Main entry point for processing a task. 
+        Main entry point for processing a task.
         This will typically involve organizing the task for supervision (decomposition).
         """
-        logger.info(f"Swarm.run called for task_id: {task_id}, description: {task_description[:100]}...")
+        logger.info(
+            f"Swarm.run called for task_id: {task_id}, description: {task_description[:100]}..."
+        )
         # For now, assume all tasks passed to Swarm.run are to be supervised and decomposed.
         # In the future, logic could be added here to differentiate simple vs. complex tasks.
-        return self.organize_task_for_supervision(task=task_description, parent_task_id=task_id)
+        return self.organize_task_for_supervision(
+            task=task_description, parent_task_id=task_id
+        )
 
-    def organize_task_for_supervision(self, task: str, parent_task_id: str) -> Dict[str, Any]:
+    def organize_task_for_supervision(
+        self, task: str, parent_task_id: str
+    ) -> Dict[str, Any]:
         """
         Orchestrates task decomposition using an OrganizerAgent, registers subtasks,
         updates the parent task status to 'awaiting_subtasks', and returns information about the subtasks.
@@ -1603,51 +1726,64 @@ class Swarm:
         )
         organizer = self.meta_agents.get("OrganizerAgent")
         if not organizer:
-            logger.error(f"[{parent_task_id}] OrganizerAgent not found. Parent task {parent_task_id} will be marked as failed.")
+            logger.error(
+                f"[{parent_task_id}] OrganizerAgent not found. Parent task {parent_task_id} will be marked as failed."
+            )
             self.cursor.execute(
                 "UPDATE tasks SET status = ?, error_message = ?, updated_at = ? WHERE task_id = ?",
-                ("failed", "OrganizerAgent not found for decomposition", datetime.datetime.now().isoformat(), parent_task_id),
+                (
+                    "failed",
+                    "OrganizerAgent not found for decomposition",
+                    datetime.datetime.now().isoformat(),
+                    parent_task_id,
+                ),
             )
             self.db_connection.commit()
             return {"error": "OrganizerAgent not found"}
 
         # Construct a more detailed and prescriptive prompt for the OrganizerAgent
-        worker_agent_names = [name for name, agent_obj in self.agents.items() if hasattr(agent_obj, 'role') and agent_obj.role == "worker"]
-        supervisor_agent_names = [name for name, agent_obj in self.supervisors.items() if hasattr(agent_obj, 'role') and agent_obj.role == "supervisor"]
-    
+        worker_agent_names = [
+            name
+            for name, agent_obj in self.agents.items()
+            if hasattr(agent_obj, "role") and agent_obj.role == "worker"
+        ]
+        supervisor_agent_names = [
+            name
+            for name, agent_obj in self.supervisors.items()
+            if hasattr(agent_obj, "role") and agent_obj.role == "supervisor"
+        ]
+
         # If no agents have roles defined, fall back to using all agents
         if not worker_agent_names and not supervisor_agent_names:
             worker_agent_names = list(self.agents.keys())
             supervisor_agent_names = list(self.supervisors.keys())
-            
+
         assignable_agents = worker_agent_names + supervisor_agent_names
-        
+
         if not assignable_agents:
             assignable_agents_str = "No specific worker/supervisor agents available. You may need to suggest generic roles or indicate if the task cannot be handled."
         else:
-            assignable_agents_str = ", ".join(sorted(list(set(assignable_agents)))) # Sort and unique
+            assignable_agents_str = ", ".join(
+                sorted(list(set(assignable_agents)))
+            )  # Sort and unique
 
         prompt = (
             f"You are an Organizer Agent. Your primary function is to decompose a given complex task into a sequence of smaller, actionable subtasks. \n\n"
             f"YOU MUST FORMAT YOUR OUTPUT AS A SINGLE JSON OBJECT with this exact structure:\n"
             f"{{\n"
-            f"  \"subtasks\": [\n"
-            f"    {{\"agent\": \"AgentName1\", \"subtask\": \"Description for subtask 1\"}},\n"
-            f"    {{\"agent\": \"AgentName2\", \"subtask\": \"Description for subtask 2\"}},\n"
+            f'  "subtasks": [\n'
+            f'    {{"agent": "AgentName1", "subtask": "Description for subtask 1"}},\n'
+            f'    {{"agent": "AgentName2", "subtask": "Description for subtask 2"}},\n'
             f"    ...\n"
             f"  ]\n"
             f"}}\n\n"
-            
             f"IMPORTANT RULES:\n"
             f"1. Your output MUST be ONLY the JSON object with no additional text\n"
             f"2. Each subtask object MUST have exactly two keys: 'agent' and 'subtask'\n"
             f"3. The 'agent' value MUST be one of these exact names: {assignable_agents_str}\n"
             f"4. If you think a new agent type is needed, assign that subtask to a supervisor agent\n\n"
-            
             f"MAIN TASK TO DECOMPOSE:\n{task}\n\n"
-            
             f"AVAILABLE AGENTS: {assignable_agents_str}\n\n"
-            
             f"Remember: Output ONLY the JSON object with the subtasks array.\n"
             f"If the task is simple, you can create just one subtask assigned to the most appropriate agent."
         )
@@ -1658,9 +1794,11 @@ class Swarm:
             )
             workflow_plan_str = organizer._get_llm_response(prompt)
             if not workflow_plan_str:
-                logger.error(f"[{parent_task_id}] OrganizerAgent returned an empty response. Falling back to single task execution.")
+                logger.error(
+                    f"[{parent_task_id}] OrganizerAgent returned an empty response. Falling back to single task execution."
+                )
                 raise ValueError("OrganizerAgent returned an empty plan")
-                
+
             logger.info(
                 f"[{parent_task_id}] OrganizerAgent call returned. Workflow plan received (first 200 chars): {str(workflow_plan_str)[:200]}"
             )
@@ -1674,89 +1812,124 @@ class Swarm:
 
             # Enhanced JSON extraction with multiple patterns
             workflow_json_str = None
-            
+
             # Try to find JSON in code blocks (```json ... ```)
-            json_block_match = re.search(r'```(?:json)?\s*\n(.*?)\n\s*```', workflow_plan_str, re.DOTALL | re.IGNORECASE)
+            json_block_match = re.search(
+                r"```(?:json)?\s*\n(.*?)\n\s*```",
+                workflow_plan_str,
+                re.DOTALL | re.IGNORECASE,
+            )
             if json_block_match:
                 workflow_json_str = json_block_match.group(1).strip()
                 logger.info(f"[{parent_task_id}] Extracted JSON from code block format")
-        
+
             # If not found in code blocks, try to find a JSON object directly
             if not workflow_json_str:
                 # Look for a complete JSON object with balanced braces
-                json_obj_match = re.search(r'(\{(?:[^{}]|(?:\{(?:[^{}]|(?:\{[^{}]*\}))*\}))*\})', workflow_plan_str, re.DOTALL)
+                json_obj_match = re.search(
+                    r"(\{(?:[^{}]|(?:\{(?:[^{}]|(?:\{[^{}]*\}))*\}))*\})",
+                    workflow_plan_str,
+                    re.DOTALL,
+                )
                 if json_obj_match:
                     workflow_json_str = json_obj_match.group(1).strip()
-                    logger.info(f"[{parent_task_id}] Extracted JSON using direct object pattern match")
-            
+                    logger.info(
+                        f"[{parent_task_id}] Extracted JSON using direct object pattern match"
+                    )
+
             # If still not found, assume the entire response might be JSON (last resort)
             if not workflow_json_str:
                 workflow_json_str = workflow_plan_str.strip()
-                logger.info(f"[{parent_task_id}] No specific JSON pattern found, attempting to parse entire response")
+                logger.info(
+                    f"[{parent_task_id}] No specific JSON pattern found, attempting to parse entire response"
+                )
 
             # Try to parse the extracted JSON string
+            parsed_workflow = None
             try:
                 parsed_workflow = json.loads(workflow_json_str)
-                logger.info(f"[{parent_task_id}] Successfully parsed JSON: {str(parsed_workflow)[:100]}...")
+                logger.info(
+                    f"[{parent_task_id}] Successfully parsed JSON: {str(parsed_workflow)[:100]}..."
+                )
             except json.JSONDecodeError as e:
-                logger.error(f"[{parent_task_id}] JSON parsing error: {e}. Workflow JSON: {workflow_json_str[:200]}...")
-                
+                logger.error(
+                    f"[{parent_task_id}] JSON parsing error: {e}. Workflow JSON: {workflow_json_str[:200]}..."
+                )
+
                 # Attempt to fix common JSON issues
                 fixed_json = False
-                
+
                 # Try adding missing quotes around keys
                 try:
-                    fixed_json_str = re.sub(r'([{,])\s*([a-zA-Z0-9_]+)\s*:', r'\1"\2":', workflow_json_str)
+                    fixed_json_str = re.sub(
+                        r"([{,])\s*([a-zA-Z0-9_]+)\s*:", r'\1"\2":', workflow_json_str
+                    )
                     parsed_workflow = json.loads(fixed_json_str)
                     fixed_json = True
-                    logger.info(f"[{parent_task_id}] Fixed JSON by adding quotes around keys")
-                except:
+                    logger.info(
+                        f"[{parent_task_id}] Fixed JSON by adding quotes around keys"
+                    )
+                except (json.JSONDecodeError, re.error) as e:
+                    logger.warning(f"[{parent_task_id}] Failed to fix JSON: {e}")
                     pass
-                
+
                 # If still not fixed, fall back to a default structure
                 if not fixed_json:
-                    logger.warning(f"[{parent_task_id}] Could not fix JSON. Using fallback structure.")
+                    logger.warning(
+                        f"[{parent_task_id}] Could not fix JSON. Using fallback structure."
+                    )
                     # Fallback: Create a default workflow with the original task assigned to the first available agent
                     first_agent_name = next(iter(self.agents), "GeographyAgent")
                     parsed_workflow = {
-                        "subtasks": [
-                            {
-                                "agent": first_agent_name,
-                                "subtask": task
-                            }
-                        ]
+                        "subtasks": [{"agent": first_agent_name, "subtask": task}]
                     }
 
             # Extract subtasks from the parsed workflow
             actual_steps = None
             if isinstance(parsed_workflow, dict):
                 # Try common keys where the list of steps might be nested
-                if "subtasks" in parsed_workflow and isinstance(parsed_workflow["subtasks"], list):
+                if "subtasks" in parsed_workflow and isinstance(
+                    parsed_workflow["subtasks"], list
+                ):
                     actual_steps = parsed_workflow["subtasks"]
-                    logger.info(f"[{parent_task_id}] Found subtasks list with {len(actual_steps)} items")
-                elif "steps" in parsed_workflow and isinstance(parsed_workflow["steps"], list):
+                    logger.info(
+                        f"[{parent_task_id}] Found subtasks list with {len(actual_steps)} items"
+                    )
+                elif "steps" in parsed_workflow and isinstance(
+                    parsed_workflow["steps"], list
+                ):
                     actual_steps = parsed_workflow["steps"]
-                    logger.info(f"[{parent_task_id}] Found steps list with {len(actual_steps)} items")
+                    logger.info(
+                        f"[{parent_task_id}] Found steps list with {len(actual_steps)} items"
+                    )
                 elif "workflow" in parsed_workflow:
                     # If 'workflow' key exists, check if IT is the list or contains the list
                     if isinstance(parsed_workflow["workflow"], list):
                         actual_steps = parsed_workflow["workflow"]
-                        logger.info(f"[{parent_task_id}] Found workflow list with {len(actual_steps)} items")
+                        logger.info(
+                            f"[{parent_task_id}] Found workflow list with {len(actual_steps)} items"
+                        )
                     elif isinstance(parsed_workflow["workflow"], dict):
                         if "subtasks" in parsed_workflow["workflow"] and isinstance(
                             parsed_workflow["workflow"]["subtasks"], list
                         ):
                             actual_steps = parsed_workflow["workflow"]["subtasks"]
-                            logger.info(f"[{parent_task_id}] Found nested subtasks list with {len(actual_steps)} items")
+                            logger.info(
+                                f"[{parent_task_id}] Found nested subtasks list with {len(actual_steps)} items"
+                            )
                         elif "steps" in parsed_workflow["workflow"] and isinstance(
                             parsed_workflow["workflow"]["steps"], list
                         ):
                             actual_steps = parsed_workflow["workflow"]["steps"]
-                            logger.info(f"[{parent_task_id}] Found nested steps list with {len(actual_steps)} items")
+                            logger.info(
+                                f"[{parent_task_id}] Found nested steps list with {len(actual_steps)} items"
+                            )
             elif isinstance(parsed_workflow, list):
                 # Handle case where the root JSON object IS the list of steps
                 actual_steps = parsed_workflow
-                logger.info(f"[{parent_task_id}] Found root list with {len(actual_steps)} items")
+                logger.info(
+                    f"[{parent_task_id}] Found root list with {len(actual_steps)} items"
+                )
 
             if not actual_steps:
                 logger.warning(
@@ -1775,64 +1948,100 @@ class Swarm:
             subtask_ids = []
             for step in actual_steps:
                 # Ensure step has the required fields
-                if not isinstance(step, dict) or "agent" not in step or "subtask" not in step:
+                if (
+                    not isinstance(step, dict)
+                    or "agent" not in step
+                    or "subtask" not in step
+                ):
                     if "step" in step and "agent" in step and "subtask" in step:
                         # Handle the case where we have {"step": 1, "agent": "...", "subtask": "..."}
                         agent_name = step["agent"]
                         subtask_description = step["subtask"]
                     else:
-                        logger.warning(f"[{parent_task_id}] Invalid step format: {step}. Skipping.")
+                        logger.warning(
+                            f"[{parent_task_id}] Invalid step format: {step}. Skipping."
+                        )
                         continue
                 else:
                     agent_name = step["agent"]
                     subtask_description = step["subtask"]
-                
+
                 # Validate agent exists
-                if not (agent_name in self.agents or agent_name in self.supervisors or agent_name in self.meta_agents):
-                    logger.warning(f"[{parent_task_id}] Agent '{agent_name}' not found. Assigning to first available agent.")
+                if not (
+                    agent_name in self.agents
+                    or agent_name in self.supervisors
+                    or agent_name in self.meta_agents
+                ):
+                    logger.warning(
+                        f"[{parent_task_id}] Agent '{agent_name}' not found. Assigning to first available agent."
+                    )
                     agent_name = next(iter(self.agents), None)
                     if not agent_name:
-                        logger.error(f"[{parent_task_id}] No agents available to assign subtask. Skipping.")
+                        logger.error(
+                            f"[{parent_task_id}] No agents available to assign subtask. Skipping."
+                        )
                         continue
-                
-                subtask_id = self._register_subtask(parent_task_id, subtask_description, agent_name)
+
+                subtask_id = self._register_subtask(
+                    parent_task_id, subtask_description, agent_name
+                )
                 if subtask_id:
                     subtask_ids.append(subtask_id)
-                    logger.info(f"[{parent_task_id}] Registered subtask {subtask_id} for agent '{agent_name}': {subtask_description[:50]}...")
+                    logger.info(
+                        f"[{parent_task_id}] Registered subtask {subtask_id} for agent '{agent_name}': {subtask_description[:50]}..."
+                    )
                 else:
-                    logger.error(f"[{parent_task_id}] Failed to register subtask for step: {step}")
+                    logger.error(
+                        f"[{parent_task_id}] Failed to register subtask for step: {step}"
+                    )
 
             if not subtask_ids:
-                logger.error(f"[{parent_task_id}] No subtasks were successfully registered. Task cannot proceed.")
+                logger.error(
+                    f"[{parent_task_id}] No subtasks were successfully registered. Task cannot proceed."
+                )
                 raise ValueError("No subtasks registered from the plan")
 
             # IMPORTANT: Update parent task status to 'awaiting_subtasks' instead of 'running'
             self.cursor.execute(
                 "UPDATE tasks SET status = ?, updated_at = ? WHERE task_id = ?",
-                ("awaiting_subtasks", datetime.datetime.now().isoformat(), parent_task_id),
+                (
+                    "awaiting_subtasks",
+                    datetime.datetime.now().isoformat(),
+                    parent_task_id,
+                ),
             )
             self.db_connection.commit()
-            logger.info(f"[{parent_task_id}] Parent task status updated to 'awaiting_subtasks'. {len(subtask_ids)} subtasks created.")
+            logger.info(
+                f"[{parent_task_id}] Parent task status updated to 'awaiting_subtasks'. {len(subtask_ids)} subtasks created."
+            )
 
             return {
                 "status": "decomposed",
                 "message": f"Task decomposed into {len(subtask_ids)} subtasks",
                 "parent_task_id": parent_task_id,
                 "subtask_ids": subtask_ids,
-                "workflow": parsed_workflow
+                "workflow": parsed_workflow,
             }
         except Exception as e:
             logger.error(
-                f"[{parent_task_id}] Error organizing task for supervision: {e}", exc_info=True
+                f"[{parent_task_id}] Error organizing task for supervision: {e}",
+                exc_info=True,
             )
             # Update parent task to failed if decomposition fails critically
             try:
                 self.cursor.execute(
                     "UPDATE tasks SET status = ?, error_message = ?, updated_at = ? WHERE task_id = ?",
-                    ("failed", f"Failed to decompose task: {str(e)}", datetime.datetime.now().isoformat(), parent_task_id),
+                    (
+                        "failed",
+                        f"Failed to decompose task: {str(e)}",
+                        datetime.datetime.now().isoformat(),
+                        parent_task_id,
+                    ),
                 )
                 self.db_connection.commit()
             except Exception as db_err:
-                logger.error(f"[{parent_task_id}] Additionally, DB error while marking task as failed: {db_err}")
-                
+                logger.error(
+                    f"[{parent_task_id}] Additionally, DB error while marking task as failed: {db_err}"
+                )
+
             return {"status": "error", "message": f"Failed to organize task: {str(e)}"}

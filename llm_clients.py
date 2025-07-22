@@ -1,7 +1,6 @@
 import os
 import json
 import requests
-from openai import OpenAI # Ensure this is OpenAI v1.x+
 import logging
 from typing import List, Dict, Any, Optional
 
@@ -24,26 +23,34 @@ def get_ollama_local_tags() -> Optional[List[Dict[str, Any]]]:
 
 
 def call_ollama_chat(
-    model_name: str, messages: List[Dict[str, Any]], stream: bool = False, options: Dict[str, Any] = None
+    model_name: str,
+    messages: List[Dict[str, Any]],
+    stream: bool = False,
+    options: Dict[str, Any] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Sends a chat completion request to the Ollama API.
 
     Args:
-        model_name (str): The name of the Ollama model to use (e.g., 'long-gemma').
-        messages (List[Dict[str, Any]]): A list of message objects, e.g., [{'role': 'user', 'content': 'Hello'}].
+        model_name (str): The name of the Ollama model to use (e.g.,
+            'long-gemma').
+        messages (List[Dict[str, Any]]): A list of message objects, e.g.,
+            [{'role': 'user', 'content': 'Hello'}].
         stream (bool): Whether to stream the response. Defaults to False.
-        options (Dict[str, Any]): Additional model parameters (e.g., temperature).
+        options (Dict[str, Any]): Additional model parameters (e.g.,
+            temperature).
 
     Returns:
-        Dict[str, Any]: The JSON response from the API, or None if an error occurs.
+        Dict[str, Any]: The JSON response from the API, or None if an error
+            occurs.
     """
     payload = {"model": model_name, "messages": messages, "stream": stream}
     if options:
         payload["options"] = options
 
     logger.info(
-        f"Sending request to Ollama model: {model_name} with {len(messages)} messages."
+        f"Sending request to Ollama model: {model_name} with "
+        f"{len(messages)} messages."
     )
     try:
         response = requests.post(f"{OLLAMA_BASE_URL}/chat", json=payload, timeout=60.0)
@@ -118,22 +125,28 @@ def call_xai_chat(
     request_url = f"{base_url}/chat/completions"
 
     try:
-        response = requests.post(request_url, headers=headers, json=payload, timeout=60.0)
+        response = requests.post(
+            request_url, headers=headers, json=payload, timeout=60.0
+        )
         response.raise_for_status()  # Raise an exception for HTTP errors (4xx or 5xx)
         return response.json()  # Parse JSON response
     except requests.exceptions.Timeout:
-        logger.error(f"Timeout error calling X.AI API for model {model_name} at {request_url}")
+        logger.error(
+            f"Timeout error calling X.AI API for model {model_name} at {request_url}"
+        )
         return None
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error calling X.AI API for model {model_name} at {request_url}: {e}")
-        if 'response' in locals() and response is not None:
+        logger.error(
+            f"Error calling X.AI API for model {model_name} at {request_url}: {e}"
+        )
+        if "response" in locals() and response is not None:
             logger.error(f"Response content: {response.content}")
         return None
     except json.JSONDecodeError as e:
         logger.error(
             f"Error decoding JSON response from X.AI for model {model_name} at {request_url}: {e}"
         )
-        if 'response' in locals() and response is not None:
+        if "response" in locals() and response is not None:
             logger.error(f"Response content: {response.content}")
         return None
 
