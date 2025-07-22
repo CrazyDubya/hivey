@@ -1,6 +1,7 @@
-import os
 import logging
+import os
 import sqlite3
+
 import numpy as np
 from openai import OpenAI, OpenAIError
 
@@ -21,7 +22,7 @@ def configure_logging():
 
 
 def initialize_database():
-    """Initializes the SQLite database and creates tables if they don't exist."""
+    """Initializes the SQLite database and creates tables if they don't exist."""  # noqa: E501
     db_path = os.path.abspath(DB_NAME)
     conn = None
     try:
@@ -48,13 +49,13 @@ def initialize_database():
 
         # Create indexes for performance optimization
         cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_experiences_agent_name ON experiences(agent_name)"
+            "CREATE INDEX IF NOT EXISTS idx_experiences_agent_name ON experiences(agent_name)"  # noqa: E501
         )
         cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_experiences_timestamp ON experiences(timestamp)"
+            "CREATE INDEX IF NOT EXISTS idx_experiences_timestamp ON experiences(timestamp)"  # noqa: E501
         )
         cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_experiences_task ON experiences(task)"
+            "CREATE INDEX IF NOT EXISTS idx_experiences_task ON experiences(task)"  # noqa: E501
         )
         logger.info("Database indexes created/verified for experiences table.")
 
@@ -76,13 +77,13 @@ def initialize_database():
 
         # Create indexes for memories table
         cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_memories_agent_name ON memories(agent_name)"
+            "CREATE INDEX IF NOT EXISTS idx_memories_agent_name ON memories(agent_name)"  # noqa: E501
         )
         cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_memories_timestamp ON memories(timestamp)"
+            "CREATE INDEX IF NOT EXISTS idx_memories_timestamp ON memories(timestamp)"  # noqa: E501
         )
         cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type)"
+            "CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type)"  # noqa: E501
         )
         logger.info("Database indexes created/verified for memories table.")
 
@@ -92,7 +93,7 @@ def initialize_database():
             CREATE TABLE IF NOT EXISTS tasks (
                 task_id TEXT PRIMARY KEY,
                 description TEXT NOT NULL,
-                status TEXT NOT NULL, -- e.g., queued, running, completed, failed
+                status TEXT NOT NULL, -- e.g., queued, running, completed, failed  # noqa: E501
                 result TEXT,          -- Store JSON or text result
                 error_message TEXT,   -- Store error if status is 'failed'
                 created_at TEXT NOT NULL,
@@ -107,7 +108,7 @@ def initialize_database():
 
     except sqlite3.Error as e:
         logger.error(
-            f"SQLite error during database initialization (path: {db_path}): {e}"
+            f"SQLite error during database initialization (path: {db_path}): {e}"  # noqa: E501
         )
         raise  # Re-raise the exception to signal failure
     finally:
@@ -129,7 +130,9 @@ def get_openai_client():
             openai_api_key = os.getenv("OPENAI_API_KEY")
             if not openai_api_key:
                 logger.error("OPENAI_API_KEY environment variable not set.")
-                raise ValueError("OPENAI_API_KEY environment variable not set.")
+                raise ValueError(
+                    "OPENAI_API_KEY environment variable not set."
+                )
 
             # Initialize client
             client = OpenAI(api_key=openai_api_key)
@@ -137,7 +140,7 @@ def get_openai_client():
 
         except OpenAIError as e:
             logger.error(f"Failed to initialize OpenAI client: {e}")
-            # Depending on the application's needs, you might want to exit or handle this differently
+            # Depending on the application's needs, you might want to exit or handle this differently  # noqa: E501
             raise
         except ValueError as e:
             logger.error(e)
@@ -147,7 +150,7 @@ def get_openai_client():
 
 
 def get_embedding(text, model="text-embedding-3-small"):
-    """Generates an embedding for the given text using the specified OpenAI model."""
+    """Generates an embedding for the given text using the specified OpenAI model."""  # noqa: E501
     if not text or not isinstance(text, str):
         logger.error("Invalid text input for embedding.")
         return None
@@ -178,7 +181,7 @@ def cosine_similarity(vec1, vec2):
 
     if vec1.shape != vec2.shape:
         logger.error(
-            f"Cannot calculate similarity between vectors of different shapes: {vec1.shape} vs {vec2.shape}"
+            f"Cannot calculate similarity between vectors of different shapes: {vec1.shape} vs {vec2.shape}"  # noqa: E501
         )
         return 0.0
 
