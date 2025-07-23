@@ -1,28 +1,20 @@
-import openai
-import sqlite3
+import datetime
+import json
 import logging
 import os
-import json
 import re
-import datetime
-import inspect
-import threading
+import sqlite3
 import time
 import uuid
-from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass, field
-from openai.types.chat import (
-    ChatCompletionSystemMessageParam,
-    ChatCompletionUserMessageParam,
-    ChatCompletionAssistantMessageParam,
-    ChatCompletionMessageParam,  # General type hint
-)
+from typing import Any, Callable, Dict, List, Optional
 
+import openai
 from dotenv import load_dotenv
 
-from utils import get_embedding, cosine_similarity, client as openai_client
 from llm_clients import call_ollama_chat, call_xai_chat
+from utils import client as openai_client
+from utils import cosine_similarity, get_embedding
 
 # Load environment variables
 load_dotenv()
@@ -30,16 +22,16 @@ load_dotenv()
 # Logger setup
 logger = logging.getLogger("SwarmMind")
 
-# Configure OpenAI API (This global openai.api_key might be redundant if client from utils is used consistently)
-# It's good practice to ensure it's set for any direct openai legacy calls if they exist elsewhere, but new calls should use the client.
+# Configure OpenAI API (This global openai.api_key might be redundant if client from utils is used consistently)  # noqa: E501
+# It's good practice to ensure it's set for any direct openai legacy calls if they exist elsewhere, but new calls should use the client.  # noqa: E501
 if os.getenv("OPENAI_API_KEY"):
     openai.api_key = os.getenv("OPENAI_API_KEY")
 else:
     logger.warning("OPENAI_API_KEY not found in environment variables.")
 
-# Removed redundant logging.basicConfig - will be handled by utils.configure_logging()
+# Removed redundant logging.basicConfig - will be handled by utils.configure_logging()  # noqa: E501
 # logging.basicConfig(
-#     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+#     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"  # noqa: E501
 # )
 # logger = logging.getLogger("SwarmMind") # Original position
 
@@ -77,7 +69,7 @@ class KnowledgeBase:
         else:
             db_path = os.path.abspath(DB_NAME)
             logger.warning(
-                f"KnowledgeBase creating NEW non-shared DB connection for path: {db_path}"
+                f"KnowledgeBase creating NEW non-shared DB connection for path: {db_path}"  # noqa: E501
             )
             try:
                 self.conn = sqlite3.connect(
@@ -85,12 +77,14 @@ class KnowledgeBase:
                 )  # Tables are now initialized by utils.initialize_database()
             except sqlite3.Error as e:
                 logger.error(
-                    f"SQLite error creating connection in KB __init__ (path: {db_path}): {e}"
+                    f"SQLite error creating connection in KB __init__ (path: {db_path}): {e}"  # noqa: E501
                 )
                 raise
 
         if not self.conn:
-            raise Exception("Failed to establish DB connection in KnowledgeBase")
+            raise Exception(
+                "Failed to establish DB connection in KnowledgeBase"
+            )
 
         self.cursor = self.conn.cursor()
         # Table creation logic moved to utils.initialize_database()
@@ -130,25 +124,25 @@ class KnowledgeBase:
         #         CREATE TABLE IF NOT EXISTS tasks (
         #             task_id TEXT PRIMARY KEY,
         #             description TEXT NOT NULL,
-        #             status TEXT NOT NULL, -- e.g., queued, running, completed, failed
+        #             status TEXT NOT NULL, -- e.g., queued, running, completed, failed  # noqa: E501
         #             result TEXT,          -- Store JSON or text result
-        #             error_message TEXT,   -- Store error if status is 'failed'
+        #             error_message TEXT,   -- Store error if status is 'failed'  # noqa: E501
         #             created_at TEXT NOT NULL,
         #             updated_at TEXT NOT NULL,
-        #             parent_task_id TEXT,          -- Added for subtask relationship
-        #             is_subtask BOOLEAN DEFAULT 0  -- Added to identify subtasks
+        #             parent_task_id TEXT,          -- Added for subtask relationship  # noqa: E501
+        #             is_subtask BOOLEAN DEFAULT 0  -- Added to identify subtasks  # noqa: E501
         #         )
         #     """
         #     )
         #     # Add index for parent_task_id for faster querying
         #     self.cursor.execute(
-        #         "CREATE INDEX IF NOT EXISTS idx_parent_task_id ON tasks(parent_task_id)"
+        #         "CREATE INDEX IF NOT EXISTS idx_parent_task_id ON tasks(parent_task_id)"  # noqa: E501
         #     )
         #     self.conn.commit()
 
         # except sqlite3.Error as e:
         #     logger.error(f"SQLite error during KB table init/commit: {e}")
-        #     if not self.shared_connection and hasattr(self, "conn") and self.conn:
+        #     if not self.shared_connection and hasattr(self, "conn") and self.conn:  # noqa: E501
         #         self.conn.close()
         #     raise
 
@@ -160,13 +154,15 @@ class KnowledgeBase:
         content_embedding: Optional[List[float]] = None,
         metadata: Optional[Dict] = None,
     ) -> None:
-        embedding_json = json.dumps(content_embedding) if content_embedding else None
+        embedding_json = (
+            json.dumps(content_embedding) if content_embedding else None
+        )
         metadata_json_str = json.dumps(metadata) if metadata else None
 
         try:
             self.cursor.execute(
                 """
-                INSERT INTO memories (agent_name, memory_type, content_text, content_embedding, metadata_json, timestamp)
+                INSERT INTO memories (agent_name, memory_type, content_text, content_embedding, metadata_json, timestamp)  # noqa: E501
                 VALUES (?, ?, ?, ?, ?, ?)
             """,
                 (
@@ -199,7 +195,7 @@ class KnowledgeBase:
         try:
             self.cursor.execute(
                 """
-                INSERT INTO experiences (task, agent_name, content, confidence_score, feedback, timestamp, embedding)
+                INSERT INTO experiences (task, agent_name, content, confidence_score, feedback, timestamp, embedding)  # noqa: E501
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
                 (
@@ -227,11 +223,11 @@ class KnowledgeBase:
     ) -> List[Dict[str, Any]]:
         if not task_embedding:
             logger.warning(
-                "Task embedding is empty, cannot perform semantic search for experiences."
+                "Task embedding is empty, cannot perform semantic search for experiences."  # noqa: E501
             )
             return []
 
-        query = "SELECT task, agent_name, content, confidence_score, feedback, embedding, timestamp FROM experiences"
+        query = "SELECT task, agent_name, content, confidence_score, feedback, embedding, timestamp FROM experiences"  # noqa: E501
         params = []
         if agent_name_filter:
             query += " WHERE agent_name = ?"
@@ -242,7 +238,7 @@ class KnowledgeBase:
             all_experiences = self.cursor.fetchall()
         except sqlite3.Error as e:
             logger.error(
-                f"SQLite error during query_experiences_by_similarity fetch: {e}"
+                f"SQLite error during query_experiences_by_similarity fetch: {e}"  # noqa: E501
             )
             return []
 
@@ -262,7 +258,7 @@ class KnowledgeBase:
                 exp_embedding = json.loads(exp_embedding_json)
                 if (
                     not exp_embedding
-                ):  # Handle case where embedding string is 'null' or empty list
+                ):  # Handle case where embedding string is 'null' or empty list  # noqa: E501
                     continue
                 similarity = cosine_similarity(task_embedding, exp_embedding)
                 experiences_with_similarity.append(
@@ -278,15 +274,19 @@ class KnowledgeBase:
                 )
             except json.JSONDecodeError:
                 logger.warning(
-                    f"Failed to decode embedding JSON for experience: {exp_content[:50]}..."
+                    f"Failed to decode embedding JSON for experience: {exp_content[:50]}..."  # noqa: E501
                 )
-            except Exception as e:  # Catch other errors during similarity calculation
+            except (
+                Exception
+            ) as e:  # Catch other errors during similarity calculation
                 logger.error(
-                    f"Error calculating similarity for experience '{exp_content[:50]}...': {e}"
+                    f"Error calculating similarity for experience '{exp_content[:50]}...': {e}"  # noqa: E501
                 )
 
         # Sort by similarity in descending order
-        experiences_with_similarity.sort(key=lambda x: x["similarity"], reverse=True)
+        experiences_with_similarity.sort(
+            key=lambda x: x["similarity"], reverse=True
+        )
 
         # Return top N
         return experiences_with_similarity[:limit]
@@ -295,8 +295,10 @@ class KnowledgeBase:
         self, query_embedding: List[float], limit: int = 5
     ) -> List[Dict[str, Any]]:
         """Performs a semantic search for memories based on query embedding."""
-        logger.info(f"Semantic search called with limit {limit}. Currently a stub.")
-        # This is a placeholder. Actual implementation will query 'memories' table.
+        logger.info(
+            f"Semantic search called with limit {limit}. Currently a stub."
+        )
+        # This is a placeholder. Actual implementation will query 'memories' table.  # noqa: E501
         # Example structure it might return:
         # return [
         #     {
@@ -329,7 +331,7 @@ class Agent:
         self.agent_type = agent_type
         self.llm_model_identifier = llm_model_identifier
         self.knowledge_base = KnowledgeBase(connection=db_connection)
-        self.task_history: List[Dict[str, Any]] = [] 
+        self.task_history: List[Dict[str, Any]] = []
         self.creation_time = datetime.datetime.now().isoformat()
 
     def remember(self, info: Dict[str, Any], long_term: bool = False) -> None:
@@ -349,23 +351,30 @@ class Agent:
                 self.task_history.pop(0)
 
     def recall(
-        self, query: Optional[str] = None, long_term: bool = False, limit: int = 5
+        self,
+        query: Optional[str] = None,
+        long_term: bool = False,
+        limit: int = 5,
     ) -> List[Dict[str, Any]]:
         if long_term:
             if not query:
                 logger.warning("Long-term recall attempted without a query.")
-                # Decide what to return: empty list, or perhaps all memories up to limit?
-                # For now, let's assume if no query, it implies no specific search, maybe return generic memories?
-                # This behavior might need refinement based on desired functionality.
+                # Decide what to return: empty list, or perhaps all memories up to limit?  # noqa: E501
+                # For now, let's assume if no query, it implies no specific search, maybe return generic memories?  # noqa: E501
+                # This behavior might need refinement based on desired functionality.  # noqa: E501
                 # Returning empty for now if no query for long_term.
                 return []
             query_embedding = get_embedding(query)
             if query_embedding is None:
-                logger.error(f"Could not generate embedding for query: {query}")
+                logger.error(
+                    f"Could not generate embedding for query: {query}"
+                )
                 return []
             # semantic_search expects query_embedding and limit.
-            # Agent name filtering would need to be part of semantic_search implementation itself if desired.
-            return self.knowledge_base.semantic_search(query_embedding, limit=limit)
+            # Agent name filtering would need to be part of semantic_search implementation itself if desired.  # noqa: E501
+            return self.knowledge_base.semantic_search(
+                query_embedding, limit=limit
+            )
         else:
             if not query or not self.task_history:
                 return self.task_history[:limit]
@@ -379,11 +388,15 @@ class Agent:
                     continue
 
                 entry_embedding = get_embedding(content)
-                similarity = cosine_similarity(query_embedding, entry_embedding)
+                similarity = cosine_similarity(
+                    query_embedding, entry_embedding
+                )
                 scores.append(similarity)
 
             sorted_pairs = sorted(
-                zip(scores, self.task_history), key=lambda x: x[0], reverse=True
+                zip(scores, self.task_history),
+                key=lambda x: x[0],
+                reverse=True,
             )
             return [item for _, item in sorted_pairs[:limit]]
 
@@ -400,15 +413,17 @@ class Agent:
         }
 
     def _get_llm_response(
-        self, task_description: str, model_params: Optional[Dict[str, Any]] = None
+        self,
+        task_description: str,
+        model_params: Optional[Dict[str, Any]] = None,
     ) -> str:
         model_params = model_params or {}
         system_prompt = (
-            f"You are {self.name}, a specialized agent in the SwarmMind collective intelligence system.\n\n"
+            f"You are {self.name}, a specialized agent in the SwarmMind collective intelligence system.\n\n"  # noqa: E501
             f"Your instructions: {self.instructions}\n\n"
             f"Task: {task_description}\n\n"
-            "Respond with clear, concise, and detailed information related to your specialization. "
-            "Focus on producing high-quality output that will contribute to the collective task."
+            "Respond with clear, concise, and detailed information related to your specialization. "  # noqa: E501
+            "Focus on producing high-quality output that will contribute to the collective task."  # noqa: E501
         )
 
         # Use specific types for OpenAI compatibility
@@ -422,33 +437,38 @@ class Agent:
 
         try:
             logger.info(
-                f"Agent {self.name} using model: {self.llm_model_identifier} for task: {task_description[:100]}..."
+                f"Agent {self.name} using model: {self.llm_model_identifier} for task: {task_description[:100]}..."  # noqa: E501
             )
 
             if self.llm_model_identifier.startswith("ollama/"):
+                model_name = self.llm_model_identifier.split("/", 1)[1]
                 raw_response = call_ollama_chat(
-                    model_name=self.llm_model_identifier.split("/", 1)[1],
+                    model_name=model_name,
                     messages=messages,
-                    options=model_params
-                ) 
+                    options=model_params,
+                )
                 if (
                     raw_response
                     and raw_response.get("message")
                     and isinstance(raw_response["message"], dict)
                 ):
-                    extracted_text_content = raw_response["message"].get("content")
+                    extracted_text_content = raw_response["message"].get(
+                        "content"
+                    )
                 elif raw_response and raw_response.get("error"):
                     logger.error(
-                        f"Ollama API error for {self.name} ({model_name}): {str(raw_response.get('error')) if isinstance(raw_response, dict) else 'Unknown error'}"
+                        f"Ollama API error for {self.name} ({model_name}): {str(raw_response.get('error')) if isinstance(raw_response, dict) else 'Unknown error'}"  # noqa: E501
                     )
                 else:
                     logger.warning(
-                        f"Unexpected Ollama response structure for {self.name} ({model_name}): {str(raw_response)}"
+                        f"Unexpected Ollama response structure for {self.name} ({model_name}): {str(raw_response)}"  # noqa: E501
                     )
 
             elif self.llm_model_identifier.startswith("xai/"):
                 model_name = self.llm_model_identifier.split("/", 1)[1]
-                raw_response = call_xai_chat(model_name=model_name, messages=messages)
+                raw_response = call_xai_chat(
+                    model_name=model_name, messages=messages
+                )
                 if (
                     raw_response
                     and raw_response.get("choices")
@@ -459,7 +479,7 @@ class Agent:
                         extracted_text_content = message.get("content")
                 else:
                     logger.warning(
-                        f"Unexpected X.AI response structure for {self.name} ({model_name}): {str(raw_response)}"
+                        f"Unexpected X.AI response structure for {self.name} ({model_name}): {str(raw_response)}"  # noqa: E501
                     )
 
             else:
@@ -473,52 +493,72 @@ class Agent:
                     temperature=model_params.get("temperature", 0.7),
                     max_tokens=model_params.get("max_tokens", 1024),
                 )  # type: ignore[arg-type]
-                if completion.choices and completion.choices[0].message and isinstance(completion.choices[0].message.content, str):
-                    extracted_text_content = completion.choices[0].message.content
-                # else response_content remains None, addressing old L468 error.
+                if (
+                    completion.choices
+                    and completion.choices[0].message
+                    and isinstance(completion.choices[0].message.content, str)
+                ):
+                    extracted_text_content = completion.choices[
+                        0
+                    ].message.content
+                # else response_content remains None, addressing old L468 error.  # noqa: E501
 
             # Common post-processing logic based on extracted_text_content
             if isinstance(extracted_text_content, str):
-                self.remember({"role": "assistant", "content": extracted_text_content})
+                self.remember(
+                    {"role": "assistant", "content": extracted_text_content}
+                )
                 logger.info(
-                    f"Agent {self.name} received response: {extracted_text_content[:100]}..."
+                    f"Agent {self.name} received response: {extracted_text_content[:100]}..."  # noqa: E501
                 )
                 if isinstance(extracted_text_content, str):
-                    trimmed_content = extracted_text_content[:100] if len(extracted_text_content) > 100 else extracted_text_content
+                    trimmed_content = (
+                        extracted_text_content[:100]
+                        if len(extracted_text_content) > 100
+                        else extracted_text_content
+                    )
                 else:
                     trimmed_content = ""
                 extracted_text_content = trimmed_content
                 if isinstance(extracted_text_content, str):
                     extracted_text_content = extracted_text_content.strip()
                 # Ensure response_content is a string before returning
-                return str(extracted_text_content) if extracted_text_content is not None else ""
+                return (
+                    str(extracted_text_content)
+                    if extracted_text_content is not None
+                    else ""
+                )
             else:
                 logger.error(
-                    f"Agent {self.name} received no content or non-string content from LLM ({self.llm_model_identifier})."
+                    f"Agent {self.name} received no content or non-string content from LLM ({self.llm_model_identifier})."  # noqa: E501
                 )
                 return "Error: No or invalid content received from LLM."
 
         except openai.APIError as e:
             logger.error(
-                f"OpenAI API Error for agent {self.name} ({self.llm_model_identifier}): {str(e)}"
+                f"OpenAI API Error for agent {self.name} ({self.llm_model_identifier}): {str(e)}"  # noqa: E501
             )
             return "Error: OpenAI API Error - " + str(e)
         except Exception as e:
             logger.error(
-                f"General error in _get_llm_response for agent {self.name} ({self.llm_model_identifier}): {str(e)}"
+                f"General error in _get_llm_response for agent {self.name} ({self.llm_model_identifier}): {str(e)}"  # noqa: E501
             )
             return "Error: An unexpected error occurred - " + str(e)
 
     def run(
-        self, task_description: str, context: Optional[List[Dict[str, Any]]] = None
+        self,
+        task_description: str,
+        context: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         self.task_history.append({"task": task_description})
         return self._get_llm_response(task_description)
 
-    def _evaluate_output(
-        self, task: str, output: str
-    ) -> Dict[str, Any]:
-        judge = self.swarm.meta_agents.get("JudgeAgent") if hasattr(self, 'swarm') else None
+    def _evaluate_output(self, task: str, output: str) -> Dict[str, Any]:
+        judge = (
+            self.swarm.meta_agents.get("JudgeAgent")
+            if hasattr(self, "swarm")
+            else None
+        )
         if not judge:
             logger.warning("JudgeAgent not found, cannot evaluate output.")
             return {
@@ -530,9 +570,9 @@ class Agent:
             f"Task given to {self.name}: {task}\n\n"
             f"Output from {self.name}:\n\n{output}\n\n"
             "Evaluate this output's quality, relevance, and coherence. "
-            "Provide a confidence score between 0.001 (poor) and 0.999 (excellent) "
-            "and specific feedback including strengths and areas for improvement. "
-            "Format your response clearly, ensuring the confidence score is easily parsable (e.g., 'Confidence Score: 0.85')."
+            "Provide a confidence score between 0.001 (poor) and 0.999 (excellent) "  # noqa: E501
+            "and specific feedback including strengths and areas for improvement. "  # noqa: E501
+            "Format your response clearly, ensuring the confidence score is easily parsable (e.g., 'Confidence Score: 0.85')."  # noqa: E501
         )
 
         evaluation_text: str | None = None
@@ -546,14 +586,16 @@ class Agent:
 
         try:
             logger.info(
-                f"JudgeAgent ({judge_model_identifier}) evaluating output from {self.name} for task: {task[:50]}..."
+                f"JudgeAgent ({judge_model_identifier}) evaluating output from {self.name} for task: {task[:50]}..."  # noqa: E501
             )
 
             if judge_model_identifier.startswith("ollama/"):
                 model_name = judge_model_identifier.split("/", 1)[1]
                 evaluation_text = call_ollama_chat(
-                    model_name=model_name, messages=messages, options={"temperature": 0.3}
-                ) 
+                    model_name=model_name,
+                    messages=messages,
+                    options={"temperature": 0.3},
+                )
                 if (
                     evaluation_text
                     and evaluation_text.get("message")
@@ -562,18 +604,18 @@ class Agent:
                     evaluation_text = evaluation_text["message"].get("content")
                 elif evaluation_text and evaluation_text.get("error"):
                     logger.error(
-                        f"Ollama API error for JudgeAgent ({model_name}): {str(evaluation_text.get('error')) if isinstance(evaluation_text, dict) else 'Unknown error'}"
+                        f"Ollama API error for JudgeAgent ({model_name}): {str(evaluation_text.get('error')) if isinstance(evaluation_text, dict) else 'Unknown error'}"  # noqa: E501
                     )
                 else:
                     logger.warning(
-                        f"Unexpected Ollama response structure for JudgeAgent ({model_name}): {str(evaluation_text)}"
+                        f"Unexpected Ollama response structure for JudgeAgent ({model_name}): {str(evaluation_text)}"  # noqa: E501
                     )
 
             elif judge_model_identifier.startswith("xai/"):
                 model_name = judge_model_identifier.split("/", 1)[1]
                 evaluation_text = call_xai_chat(
                     model_name=model_name, messages=messages, temperature=0.3
-                ) 
+                )
                 if (
                     evaluation_text
                     and evaluation_text.get("choices")
@@ -594,44 +636,60 @@ class Agent:
                     temperature=0.3,
                     max_tokens=500,
                 )  # type: ignore[arg-type]
-                if completion.choices and completion.choices[0].message and isinstance(completion.choices[0].message.content, str):
+                if (
+                    completion.choices
+                    and completion.choices[0].message
+                    and isinstance(completion.choices[0].message.content, str)
+                ):
                     evaluation_text = completion.choices[0].message.content
                 # else evaluation_text remains None, addressing old L587 error.
 
-            if not evaluation_text: # evaluation_text is str | None here
+            if not evaluation_text:  # evaluation_text is str | None here
                 logger.error(
-                    f"JudgeAgent ({judge_model_identifier}) received no content."
+                    f"JudgeAgent ({judge_model_identifier}) received no content."  # noqa: E501
                 )
-                raise ValueError("No content received from LLM for evaluation.")
+                raise ValueError(
+                    "No content received from LLM for evaluation."
+                )
 
             confidence_score = 0.75
-            feedback = evaluation_text
 
             if isinstance(evaluation_text, str):
                 score_match = re.search(
-                    r"(?:confidence\s*score|score):?\s*(\d(?:\.\d+)?)", evaluation_text, re.IGNORECASE
-                ) 
+                    r"(?:confidence\s*score|score):?\s*(\d(?:\.\d+)?)",
+                    evaluation_text,
+                    re.IGNORECASE,
+                )
             else:
                 score_match = None
             if score_match:
                 try:
                     confidence_score = float(score_match.group(1))
-                    confidence_score = max(0.001, min(0.999, confidence_score)) 
+                    confidence_score = max(0.001, min(0.999, confidence_score))
                 except ValueError:
                     logger.warning(
-                        f"Could not parse confidence score from: {score_match.group(1) if score_match else 'N/A'}"
+                        f"Could not parse confidence score from: {score_match.group(1) if score_match else 'N/A'}"  # noqa: E501
                     )
                     pass
             else:
                 logger.warning(
-                    f"No confidence score found in JudgeAgent output: {evaluation_text[:100]}..." if isinstance(evaluation_text, str) else "No confidence score found."
+                    f"No confidence score found in JudgeAgent output: {evaluation_text[:100]}..."  # noqa: E501
+                    if isinstance(evaluation_text, str)
+                    else "No confidence score found."
                 )
 
-            return {"confidence_score": confidence_score, "feedback": evaluation_text if isinstance(evaluation_text, str) else "Evaluation error occurred."}
+            return {
+                "confidence_score": confidence_score,
+                "feedback": (
+                    evaluation_text
+                    if isinstance(evaluation_text, str)
+                    else "Evaluation error occurred."
+                ),
+            }
 
         except Exception as e:
             logger.error(
-                f"Error evaluating output with JudgeAgent ({judge_model_identifier}): {e}"
+                f"Error evaluating output with JudgeAgent ({judge_model_identifier}): {e}"  # noqa: E501
             )
             return {
                 "confidence_score": 0.5,
@@ -641,24 +699,28 @@ class Agent:
 
 class Swarm:
     def __init__(self, db_connection: Optional[sqlite3.Connection]):
-        """Initialize the swarm with a shared database connection and load agents"""
+        """Initialize the swarm with a shared database connection and load agents"""  # noqa: E501
         self.db_connection = db_connection  # Store the shared connection
         self.agents: Dict[str, Agent] = {}
         self.supervisors: Dict[str, Agent] = {}
         self.meta_agents: Dict[str, Agent] = {}
         self.context_variables: Dict[str, Any] = {}
         self.global_memory: List[Dict[str, Any]] = []
-        self._init_db() # Ensures tables are created if they don't exist
+        self._init_db()  # Ensures tables are created if they don't exist
         self.knowledge_base = KnowledgeBase(connection=self.db_connection)
-        self._initialize_essential_agents() # Load/create initial agents
+        self._initialize_essential_agents()  # Load/create initial agents
 
     def _init_db(self):
         if not self.db_connection:
-            logger.error("Database connection is not initialized for Swarm._init_db")
+            logger.error(
+                "Database connection is not initialized for Swarm._init_db"
+            )
             raise ConnectionError("Database connection not initialized")
-        
-        self.cursor = self.db_connection.cursor() # Ensure cursor is from self.db_connection
-        
+
+        self.cursor = (
+            self.db_connection.cursor()
+        )  # Ensure cursor is from self.db_connection
+
         # Ensure 'agents' table exists
         self.cursor.execute(
             """
@@ -677,14 +739,14 @@ class Swarm:
             CREATE TABLE IF NOT EXISTS tasks (
                 task_id TEXT PRIMARY KEY,
                 description TEXT NOT NULL,
-                status TEXT NOT NULL, -- e.g., queued, running, completed, failed
+                status TEXT NOT NULL, -- e.g., queued, running, completed, failed  # noqa: E501
                 result TEXT,          -- Store JSON or text result
                 error_message TEXT,   -- Store error if status is 'failed'
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 parent_task_id TEXT,          -- Added for subtask relationship
                 is_subtask BOOLEAN DEFAULT 0,  -- Added to identify subtasks
-                assigned_agent_name TEXT      -- Added to specify which agent should run a subtask
+                assigned_agent_name TEXT      -- Added to specify which agent should run a subtask  # noqa: E501
             )
         """
         )
@@ -694,31 +756,43 @@ class Swarm:
         columns = [info[1] for info in self.cursor.fetchall()]
 
         if "parent_task_id" not in columns:
-            logger.info("Migrating 'tasks' table: Adding column 'parent_task_id'")
-            self.cursor.execute("ALTER TABLE tasks ADD COLUMN parent_task_id TEXT")
+            logger.info(
+                "Migrating 'tasks' table: Adding column 'parent_task_id'"
+            )
+            self.cursor.execute(
+                "ALTER TABLE tasks ADD COLUMN parent_task_id TEXT"
+            )
         if "is_subtask" not in columns:
             logger.info("Migrating 'tasks' table: Adding column 'is_subtask'")
-            self.cursor.execute("ALTER TABLE tasks ADD COLUMN is_subtask BOOLEAN DEFAULT 0")
+            self.cursor.execute(
+                "ALTER TABLE tasks ADD COLUMN is_subtask BOOLEAN DEFAULT 0"
+            )
         if "assigned_agent_name" not in columns:
-            logger.info("Migrating 'tasks' table: Adding column 'assigned_agent_name'")
-            self.cursor.execute("ALTER TABLE tasks ADD COLUMN assigned_agent_name TEXT")
+            logger.info(
+                "Migrating 'tasks' table: Adding column 'assigned_agent_name'"
+            )
+            self.cursor.execute(
+                "ALTER TABLE tasks ADD COLUMN assigned_agent_name TEXT"
+            )
 
-        # Add index for parent_task_id for faster querying (now columns are guaranteed to exist)
+        # Add index for parent_task_id for faster querying (now columns are guaranteed to exist)  # noqa: E501
         self.cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_parent_task_id ON tasks(parent_task_id)"
+            "CREATE INDEX IF NOT EXISTS idx_parent_task_id ON tasks(parent_task_id)"  # noqa: E501
         )
         self.db_connection.commit()
-        logger.info("Swarm database initialized: 'agents' and 'tasks' tables ensured with new fields.")
+        logger.info(
+            "Swarm database initialized: 'agents' and 'tasks' tables ensured with new fields."  # noqa: E501
+        )
 
     def _initialize_essential_agents(self):
-        # Calls to self.add_agent will use self.knowledge_base.conn (shared) via Agent constructor
+        # Calls to self.add_agent will use self.knowledge_base.conn (shared) via Agent constructor  # noqa: E501
         # Meta-agents (highest tier)
         self.add_agent(
             name="OrganizerAgent",
             instructions=(
-                "You are the Organizer Agent responsible for coordinating the swarm. "
-                "You analyze tasks, delegate to appropriate agents, and ensure coherent outputs. "
-                "You can propose new agents when needed based on task requirements."
+                "You are the Organizer Agent responsible for coordinating the swarm. "  # noqa: E501
+                "You analyze tasks, delegate to appropriate agents, and ensure coherent outputs. "  # noqa: E501
+                "You can propose new agents when needed based on task requirements."  # noqa: E501
             ),
             agent_type="meta",
         )
@@ -726,10 +800,10 @@ class Swarm:
         self.add_agent(
             name="JudgeAgent",
             instructions=(
-                "You evaluate the outputs of other agents, providing confidence scores and feedback. "
-                "You ensure the quality, relevance, and coherence of content generated by the swarm. "
-                "Score from 0.001 to 0.999 and provide specific feedback including strengths and areas for improvement. "
-                "Format your response clearly, ensuring the confidence score is easily parsable (e.g., 'Confidence Score: 0.85')."
+                "You evaluate the outputs of other agents, providing confidence scores and feedback. "  # noqa: E501
+                "You ensure the quality, relevance, and coherence of content generated by the swarm. "  # noqa: E501
+                "Score from 0.001 to 0.999 and provide specific feedback including strengths and areas for improvement. "  # noqa: E501
+                "Format your response clearly, ensuring the confidence score is easily parsable (e.g., 'Confidence Score: 0.85')."  # noqa: E501
             ),
             agent_type="meta",
         )
@@ -737,11 +811,11 @@ class Swarm:
         self.add_agent(
             name="InspiratorAgent",
             instructions=(
-                "You are a highly creative and analytical AI. Your role is to identify gaps in the swarm's capabilities "
-                "and propose new, specialized agents that would enhance the collective intelligence. When proposing, "
-                "suggest a suitable name, detailed instructions, an agent_type (worker/supervisor). For the LLM model, "
-                "you must choose between 'low' (for simpler tasks, maps to ollama/long-gemma) or 'high' (for complex tasks, maps to xai/grok-3-latest). "
-                "Provide a clear rationale for your proposal, including your choice of 'low' or 'high' for the model."
+                "You are a highly creative and analytical AI. Your role is to identify gaps in the swarm's capabilities "  # noqa: E501
+                "and propose new, specialized agents that would enhance the collective intelligence. When proposing, "  # noqa: E501
+                "suggest a suitable name, detailed instructions, an agent_type (worker/supervisor). For the LLM model, "  # noqa: E501
+                "you must choose between 'low' (for simpler tasks, maps to ollama/long-gemma) or 'high' (for complex tasks, maps to xai/grok-3-latest). "  # noqa: E501
+                "Provide a clear rationale for your proposal, including your choice of 'low' or 'high' for the model."  # noqa: E501
             ),
             agent_type="meta",
             llm_model_identifier=DEFAULT_LLM_MODEL,
@@ -752,7 +826,7 @@ class Swarm:
             name="WorldSupervisor",
             instructions=(
                 "You supervise agents involved in world-building tasks. "
-                "You coordinate their efforts and ensure consistency across geographical, cultural, historical, "
+                "You coordinate their efforts and ensure consistency across geographical, cultural, historical, "  # noqa: E501
                 "and technological aspects of created worlds."
             ),
             agent_type="supervisor",
@@ -762,7 +836,7 @@ class Swarm:
             name="NarrativeSupervisor",
             instructions=(
                 "You supervise agents involved in narrative creation. "
-                "You ensure coherent storylines, character development, and plot progression. "
+                "You ensure coherent storylines, character development, and plot progression. "  # noqa: E501
                 "You coordinate between character, plot, and dialogue agents."
             ),
             agent_type="supervisor",
@@ -772,9 +846,9 @@ class Swarm:
         self.add_agent(
             name="GeographyAgent",
             instructions=(
-                "Create detailed geographical aspects of worlds including continents, climates, "
-                "terrain features, natural resources, and ecosystems. Consider how geography "
-                "influences other aspects of the world such as culture and politics."
+                "Create detailed geographical aspects of worlds including continents, climates, "  # noqa: E501
+                "terrain features, natural resources, and ecosystems. Consider how geography "  # noqa: E501
+                "influences other aspects of the world such as culture and politics."  # noqa: E501
             ),
             llm_model_identifier="ollama/long-gemma",
             agent_type="worker",
@@ -783,9 +857,9 @@ class Swarm:
         self.add_agent(
             name="CultureAgent",
             instructions=(
-                "Develop rich cultural elements including customs, traditions, languages, "
-                "arts, religions, social structures, and values. Create distinct cultural groups "
-                "and explain how they interact with each other and their environment."
+                "Develop rich cultural elements including customs, traditions, languages, "  # noqa: E501
+                "arts, religions, social structures, and values. Create distinct cultural groups "  # noqa: E501
+                "and explain how they interact with each other and their environment."  # noqa: E501
             ),
             llm_model_identifier="xai/grok-3-latest",
             agent_type="worker",
@@ -794,9 +868,9 @@ class Swarm:
         self.add_agent(
             name="HistoryAgent",
             instructions=(
-                "Craft detailed historical timelines including major events, wars, discoveries, "
-                "technological advancements, political shifts, and cultural developments. "
-                "Create a sense of how the past shapes the present world state."
+                "Craft detailed historical timelines including major events, wars, discoveries, "  # noqa: E501
+                "technological advancements, political shifts, and cultural developments. "  # noqa: E501
+                "Create a sense of how the past shapes the present world state."  # noqa: E501
             ),
             llm_model_identifier="xai/grok-3-latest",
             agent_type="worker",
@@ -805,8 +879,8 @@ class Swarm:
         self.add_agent(
             name="CharacterAgent",
             instructions=(
-                "Create compelling characters with distinct personalities, motivations, backgrounds, "
-                "relationships, strengths, and flaws. Ensure characters feel authentic and reflect "
+                "Create compelling characters with distinct personalities, motivations, backgrounds, "  # noqa: E501
+                "relationships, strengths, and flaws. Ensure characters feel authentic and reflect "  # noqa: E501
                 "their cultural and historical context."
             ),
             llm_model_identifier="xai/grok-3-latest",
@@ -838,11 +912,19 @@ class Swarm:
 
         self.knowledge_base.cursor.execute(
             """
-            INSERT OR REPLACE INTO agents 
-            (name, instructions, tier, creation_time, task_count, success_rate, last_active)
+            INSERT OR REPLACE INTO agents
+            (name, instructions, tier, creation_time, task_count, success_rate, last_active)  # noqa: E501
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-            (name, instructions, agent_type, agent.creation_time, 0, 0.0, None),
+            (
+                name,
+                instructions,
+                agent_type,
+                agent.creation_time,
+                0,
+                0.0,
+                None,
+            ),
         )
         if self.knowledge_base.conn:
             self.knowledge_base.conn.commit()
@@ -850,7 +932,10 @@ class Swarm:
         return agent
 
     def run_agent(
-        self, agent_name: str, task: str, context: Optional[Dict[str, Any]] = None
+        self,
+        agent_name: str,
+        task: str,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         agent = self._get_agent(agent_name)
         if not agent:
@@ -863,32 +948,40 @@ class Swarm:
         if context:
             full_context.update(context)
 
-        relevant_experiences = self._get_relevant_experiences(task, agent_name, limit=3)
+        relevant_experiences = self._get_relevant_experiences(
+            task, agent_name, limit=3
+        )
         experiences_text = self._format_experiences(relevant_experiences)
 
         relevant_memories = agent.recall(query=task, limit=3)
         memories_text = self._format_memories(relevant_memories)
 
         system_prompt = (
-            f"You are {agent_name}, a specialized agent in the SwarmMind collective intelligence system.\n\n"
+            f"You are {agent_name}, a specialized agent in the SwarmMind collective intelligence system.\n\n"  # noqa: E501
             f"Your instructions: {agent.instructions}\n\n"
             f"Task: {task}\n\n"
         )
 
         if experiences_text:
-            system_prompt += "Relevant past experiences:\n" + experiences_text + "\n\n"
+            system_prompt += (
+                "Relevant past experiences:\n" + experiences_text + "\n\n"
+            )
 
         if memories_text:
-            system_prompt += "Your relevant memories:\n" + memories_text + "\n\n"
+            system_prompt += (
+                "Your relevant memories:\n" + memories_text + "\n\n"
+            )
 
         if full_context:
             system_prompt += (
-                "Context variables:\n" + json.dumps(full_context, indent=2) + "\n\n"
+                "Context variables:\n"
+                + json.dumps(full_context, indent=2)
+                + "\n\n"
             )
 
         system_prompt += (
-            "Respond with clear, concise, and detailed information related to your specialization. "
-            "Focus on producing high-quality output that will contribute to the collective task."
+            "Respond with clear, concise, and detailed information related to your specialization. "  # noqa: E501
+            "Focus on producing high-quality output that will contribute to the collective task."  # noqa: E501
         )
 
         try:
@@ -904,17 +997,19 @@ class Swarm:
             try:
                 # Fetch current stats
                 self.knowledge_base.cursor.execute(
-                    "SELECT task_count, success_rate FROM agents WHERE name = ?",
+                    "SELECT task_count, success_rate FROM agents WHERE name = ?",  # noqa: E501
                     (agent_name,),
                 )
                 result = self.knowledge_base.cursor.fetchone()
                 if result:
                     current_task_count, current_success_rate = result
                     current_task_count = current_task_count or 0  # Handle None
-                    current_success_rate = current_success_rate or 0.0  # Handle None
+                    current_success_rate = (
+                        current_success_rate or 0.0
+                    )  # Handle None
                 else:
                     logger.warning(
-                        f"Could not fetch stats for agent {agent_name} to update."
+                        f"Could not fetch stats for agent {agent_name} to update."  # noqa: E501
                     )
                     current_task_count, current_success_rate = 0, 0.0
 
@@ -926,12 +1021,13 @@ class Swarm:
 
                 # Weighted average calculation
                 new_success_rate = (
-                    (current_success_rate * current_task_count) + evaluation_score
+                    (current_success_rate * current_task_count)
+                    + evaluation_score
                 ) / new_task_count
 
                 # Update DB
                 self.knowledge_base.cursor.execute(
-                    "UPDATE agents SET task_count = ?, success_rate = ?, last_active = ? WHERE name = ?",
+                    "UPDATE agents SET task_count = ?, success_rate = ?, last_active = ? WHERE name = ?",  # noqa: E501
                     (
                         new_task_count,
                         new_success_rate,
@@ -942,18 +1038,18 @@ class Swarm:
                 if self.knowledge_base.conn:
                     self.knowledge_base.conn.commit()
                 logger.debug(
-                    f"Updated stats for {agent_name}: tasks={new_task_count}, success_rate={new_success_rate:.2f}"
+                    f"Updated stats for {agent_name}: tasks={new_task_count}, success_rate={new_success_rate:.2f}"  # noqa: E501
                 )
 
             except sqlite3.Error as db_err:
                 logger.error(
-                    f"Database error updating agent stats for {agent_name}: {db_err}"
+                    f"Database error updating agent stats for {agent_name}: {db_err}"  # noqa: E501
                 )
             except (
                 Exception
-            ) as calc_err:  # Catch potential calculation errors (e.g., division by zero if logic flawed)
+            ) as calc_err:  # Catch potential calculation errors (e.g., division by zero if logic flawed)  # noqa: E501
                 logger.error(
-                    f"Error calculating agent stats for {agent_name}: {calc_err}"
+                    f"Error calculating agent stats for {agent_name}: {calc_err}"  # noqa: E501
                 )
             # --- End Update Agent Stats ---
 
@@ -1012,9 +1108,9 @@ class Swarm:
             f"Task given to {agent_name}: {task}\n\n"
             f"Output from {agent_name}:\n\n{output}\n\n"
             "Evaluate this output's quality, relevance, and coherence. "
-            "Provide a confidence score between 0.001 (poor) and 0.999 (excellent) "
-            "and specific feedback including strengths and areas for improvement. "
-            "Format your response clearly, ensuring the confidence score is easily parsable (e.g., 'Confidence Score: 0.85')."
+            "Provide a confidence score between 0.001 (poor) and 0.999 (excellent) "  # noqa: E501
+            "and specific feedback including strengths and areas for improvement. "  # noqa: E501
+            "Format your response clearly, ensuring the confidence score is easily parsable (e.g., 'Confidence Score: 0.85')."  # noqa: E501
         )
 
         evaluation_text: str | None = None
@@ -1028,14 +1124,16 @@ class Swarm:
 
         try:
             logger.info(
-                f"JudgeAgent ({judge_model_identifier}) evaluating output from {agent_name} for task: {task[:50]}..."
+                f"JudgeAgent ({judge_model_identifier}) evaluating output from {agent_name} for task: {task[:50]}..."  # noqa: E501
             )
 
             if judge_model_identifier.startswith("ollama/"):
                 model_name = judge_model_identifier.split("/", 1)[1]
                 evaluation_text = call_ollama_chat(
-                    model_name=model_name, messages=messages, options={"temperature": 0.3}
-                ) 
+                    model_name=model_name,
+                    messages=messages,
+                    options={"temperature": 0.3},
+                )
                 if (
                     evaluation_text
                     and evaluation_text.get("message")
@@ -1044,18 +1142,18 @@ class Swarm:
                     evaluation_text = evaluation_text["message"].get("content")
                 elif evaluation_text and evaluation_text.get("error"):
                     logger.error(
-                        f"Ollama API error for JudgeAgent ({model_name}): {str(evaluation_text.get('error')) if isinstance(evaluation_text, dict) else 'Unknown error'}"
+                        f"Ollama API error for JudgeAgent ({model_name}): {str(evaluation_text.get('error')) if isinstance(evaluation_text, dict) else 'Unknown error'}"  # noqa: E501
                     )
                 else:
                     logger.warning(
-                        f"Unexpected Ollama response structure for JudgeAgent ({model_name}): {str(evaluation_text)}"
+                        f"Unexpected Ollama response structure for JudgeAgent ({model_name}): {str(evaluation_text)}"  # noqa: E501
                     )
 
             elif judge_model_identifier.startswith("xai/"):
                 model_name = judge_model_identifier.split("/", 1)[1]
                 evaluation_text = call_xai_chat(
                     model_name=model_name, messages=messages, temperature=0.3
-                ) 
+                )
                 if (
                     evaluation_text
                     and evaluation_text.get("choices")
@@ -1076,44 +1174,60 @@ class Swarm:
                     temperature=0.3,
                     max_tokens=500,
                 )  # type: ignore[arg-type]
-                if completion.choices and completion.choices[0].message and isinstance(completion.choices[0].message.content, str):
+                if (
+                    completion.choices
+                    and completion.choices[0].message
+                    and isinstance(completion.choices[0].message.content, str)
+                ):
                     evaluation_text = completion.choices[0].message.content
-                # else evaluation_text remains None, addressing old L1041 error.
+                # else evaluation_text remains None, addressing old L1041 error.  # noqa: E501
 
-            if not evaluation_text: # evaluation_text is str | None here
+            if not evaluation_text:  # evaluation_text is str | None here
                 logger.error(
-                    f"JudgeAgent ({judge_model_identifier}) received no content."
+                    f"JudgeAgent ({judge_model_identifier}) received no content."  # noqa: E501
                 )
-                raise ValueError("No content received from LLM for evaluation.")
+                raise ValueError(
+                    "No content received from LLM for evaluation."
+                )
 
             confidence_score = 0.75
-            feedback = evaluation_text
 
             if isinstance(evaluation_text, str):
                 score_match = re.search(
-                    r"(?:confidence\s*score|score):?\s*(\d(?:\.\d+)?)", evaluation_text, re.IGNORECASE
-                ) 
+                    r"(?:confidence\s*score|score):?\s*(\d(?:\.\d+)?)",
+                    evaluation_text,
+                    re.IGNORECASE,
+                )
             else:
                 score_match = None
             if score_match:
                 try:
                     confidence_score = float(score_match.group(1))
-                    confidence_score = max(0.001, min(0.999, confidence_score)) 
+                    confidence_score = max(0.001, min(0.999, confidence_score))
                 except ValueError:
                     logger.warning(
-                        f"Could not parse confidence score from: {score_match.group(1) if score_match else 'N/A'}"
+                        f"Could not parse confidence score from: {score_match.group(1) if score_match else 'N/A'}"  # noqa: E501
                     )
                     pass
             else:
                 logger.warning(
-                    f"No confidence score found in JudgeAgent output: {evaluation_text[:100]}..." if isinstance(evaluation_text, str) else "No confidence score found."
+                    f"No confidence score found in JudgeAgent output: {evaluation_text[:100]}..."  # noqa: E501
+                    if isinstance(evaluation_text, str)
+                    else "No confidence score found."
                 )
 
-            return {"confidence_score": confidence_score, "feedback": evaluation_text if isinstance(evaluation_text, str) else "Evaluation error occurred."}
+            return {
+                "confidence_score": confidence_score,
+                "feedback": (
+                    evaluation_text
+                    if isinstance(evaluation_text, str)
+                    else "Evaluation error occurred."
+                ),
+            }
 
         except Exception as e:
             logger.error(
-                f"Error evaluating output with JudgeAgent ({judge_model_identifier}): {e}"
+                f"Error evaluating output with JudgeAgent ({judge_model_identifier}): {e}"  # noqa: E501
             )
             return {
                 "confidence_score": 0.5,
@@ -1124,20 +1238,26 @@ class Swarm:
         self, task: str, agent_name: Optional[str] = None, limit: int = 5
     ) -> List[Dict[str, Any]]:
         logger.debug(
-            f"Getting relevant experiences for task: '{task[:50]}...' for agent: {agent_name}"
+            f"Getting relevant experiences for task: '{task[:50]}...' for agent: {agent_name}"  # noqa: E501
         )
         try:
             task_embedding = get_embedding(task)
             if not task_embedding:
-                logger.warning(f"Could not generate embedding for task: {task}")
+                logger.warning(
+                    f"Could not generate embedding for task: {task}"
+                )
                 return []
 
-            relevant_experiences = self.knowledge_base.query_experiences_by_similarity(
-                task_embedding=task_embedding,
-                agent_name_filter=agent_name,  # Filter by agent_name
-                limit=limit,
+            relevant_experiences = (
+                self.knowledge_base.query_experiences_by_similarity(
+                    task_embedding=task_embedding,
+                    agent_name_filter=agent_name,  # Filter by agent_name
+                    limit=limit,
+                )
             )
-            logger.debug(f"Found {len(relevant_experiences)} relevant experiences.")
+            logger.debug(
+                f"Found {len(relevant_experiences)} relevant experiences."
+            )
             return relevant_experiences
         except Exception as e:
             logger.error(
@@ -1152,13 +1272,13 @@ class Swarm:
 
         formatted = []
         for exp in experiences:
-            if isinstance(exp.get('content'), str):
+            if isinstance(exp.get("content"), str):
                 formatted.append(
-                    f"Agent: {exp['agent_name']}\nTask: {exp['task']}\nOutput: {exp['content'][:100]}..."
+                    f"Agent: {exp['agent_name']}\nTask: {exp['task']}\nOutput: {exp['content'][:100]}..."  # noqa: E501
                 )
             else:
                 formatted.append(
-                    f"Agent: {exp['agent_name']}\nTask: {exp['task']}\nOutput: {str(exp.get('content', ''))[:100]}..."
+                    f"Agent: {exp['agent_name']}\nTask: {exp['task']}\nOutput: {str(exp.get('content', ''))[:100]}..."  # noqa: E501
                 )
 
         return "\n".join(formatted)
@@ -1170,7 +1290,7 @@ class Swarm:
         formatted = []
         for mem in memories:
             formatted.append(
-                f"Task: {mem.get('task', 'Unknown')}\nContent: {mem.get('content', '')[:100]}...\nTimestamp: {mem.get('timestamp', 'Unknown')}\n"
+                f"Task: {mem.get('task', 'Unknown')}\nContent: {mem.get('content', '')[:100]}...\nTimestamp: {mem.get('timestamp', 'Unknown')}\n"  # noqa: E501
             )
 
         return "\n".join(formatted)
@@ -1182,9 +1302,9 @@ class Swarm:
             return {"error": "InspirationAgent not found"}
 
         prompt = (
-            f"Analyze this task and propose a new specialized agent that would enhance the swarm's capabilities:\n\n"
+            f"Analyze this task and propose a new specialized agent that would enhance the swarm's capabilities:\n\n"  # noqa: E501
             f"Task: {task}\n\n"
-            f"Current agents: {', '.join(list(self.agents.keys()) + list(self.supervisors.keys()))}\n\n"
+            f"Current agents: {', '.join(list(self.agents.keys()) + list(self.supervisors.keys()))}\n\n"  # noqa: E501
             "Provide your response in this format:\n"
             "Agent Name: [name]\n"
             "Instructions: [detailed instructions]\n"
@@ -1208,7 +1328,7 @@ class Swarm:
 
         name_match = re.search(r"Agent Name:\s*(.+)", proposal, re.IGNORECASE)
         instructions_match = re.search(
-            r"Instructions:\s*(.+?)(?=Agent Type:|LLM Model Identifier:|Rationale:|$)",
+            r"Instructions:\s*(.+?)(?=Agent Type:|LLM Model Identifier:|Rationale:|$)",  # noqa: E501
             proposal,
             re.DOTALL | re.IGNORECASE,
         )
@@ -1235,7 +1355,7 @@ class Swarm:
                 final_llm_model_identifier = "xai/grok-3-latest"
                 if suggested_model_tier != "high" and llm_identifier_match:
                     logger.warning(
-                        f"InspiratorAgent suggested LLM tier '{suggested_model_tier}', defaulting to 'high' (xai/grok-3-latest)."
+                        f"InspiratorAgent suggested LLM tier '{suggested_model_tier}', defaulting to 'high' (xai/grok-3-latest)."  # noqa: E501
                     )
 
             agent_proposal = {
@@ -1283,61 +1403,107 @@ class Swarm:
             "agent": new_agent.to_dict(),
         }
 
-    def execute_subtask(self, agent_name: str, task_description: str, subtask_id: str) -> Dict[str, Any]:
-        logger.info(f"[{subtask_id}] Executing subtask by agent '{agent_name}': {task_description[:50]}...")
+    def execute_subtask(
+        self, agent_name: str, task_description: str, subtask_id: str
+    ) -> Dict[str, Any]:
+        logger.info(
+            f"[{subtask_id}] Executing subtask by agent '{agent_name}': {task_description[:50]}..."  # noqa: E501
+        )
         agent = self._get_agent(agent_name)
 
         if not agent:
-            logger.error(f"[{subtask_id}] Agent '{agent_name}' not found for subtask execution.")
+            logger.error(
+                f"[{subtask_id}] Agent '{agent_name}' not found for subtask execution."  # noqa: E501
+            )
             error_message = f"Agent '{agent_name}' not found."
             self.cursor.execute(
-                "UPDATE tasks SET status = ?, error_message = ?, updated_at = ? WHERE task_id = ?",
-                ("failed", error_message, datetime.datetime.now().isoformat(), subtask_id)
+                "UPDATE tasks SET status = ?, error_message = ?, updated_at = ? WHERE task_id = ?",  # noqa: E501
+                (
+                    "failed",
+                    error_message,
+                    datetime.datetime.now().isoformat(),
+                    subtask_id,
+                ),
             )
             self.db_connection.commit()
             return {"error": error_message, "subtask_id": subtask_id}
 
         try:
-            # Assuming the core work of a subtask agent is to process the description (e.g., via LLM)
-            # We'll use _get_llm_response for now, as it's a common method for LLM-based agents.
-            # If agents have a more general 'execute' or 'run_task' method, that could be used.
+            # Assuming the core work of a subtask agent is to process the description (e.g., via LLM)  # noqa: E501
+            # We'll use _get_llm_response for now, as it's a common method for LLM-based agents.  # noqa: E501
+            # If agents have a more general 'execute' or 'run_task' method, that could be used.  # noqa: E501
             # For non-LLM agents, this would need to be adapted.
-            
-            # Construct a prompt that is suitable for a direct task, if necessary.
-            # For now, let's assume task_description is already well-formed for the agent.
-            # If the agent has specific prompting needs, this might be where it's adapted.
-            # Example: prompt = f"You are {agent.name}. Your task is: {task_description}"
-            # result_data = agent._get_llm_response(prompt)
-            
-            result_data = agent._get_llm_response(task_description) # Direct call for now
 
-            logger.info(f"[{subtask_id}] Subtask executed by '{agent_name}'. Result: {str(result_data)[:100]}...")
-            
-            # Determine if the result_data itself indicates an error from the agent
+            # Construct a prompt that is suitable for a direct task, if necessary.  # noqa: E501
+            # For now, let's assume task_description is already well-formed for the agent.  # noqa: E501
+            # If the agent has specific prompting needs, this might be where it's adapted.  # noqa: E501
+            # Example: prompt = f"You are {agent.name}. Your task is: {task_description}"  # noqa: E501
+            # result_data = agent._get_llm_response(prompt)
+
+            result_data = agent._get_llm_response(
+                task_description
+            )  # Direct call for now
+
+            logger.info(
+                f"[{subtask_id}] Subtask executed by '{agent_name}'. Result: {str(result_data)[:100]}..."  # noqa: E501
+            )
+
+            # Determine if the result_data itself indicates an error from the agent  # noqa: E501
             if isinstance(result_data, dict) and result_data.get("error"):
                 error_from_agent = str(result_data.get("error"))
-                logger.error(f"[{subtask_id}] Agent '{agent_name}' reported an error: {error_from_agent}")
-                self.cursor.execute(
-                    "UPDATE tasks SET status = ?, result = ?, error_message = ?, updated_at = ? WHERE task_id = ?",
-                    ("failed", json.dumps(result_data), error_from_agent, datetime.datetime.now().isoformat(), subtask_id)
+                logger.error(
+                    f"[{subtask_id}] Agent '{agent_name}' reported an error: {error_from_agent}"  # noqa: E501
                 )
-                final_status = {"error": error_from_agent, "subtask_id": subtask_id, "output": result_data}
+                self.cursor.execute(
+                    "UPDATE tasks SET status = ?, result = ?, error_message = ?, updated_at = ? WHERE task_id = ?",  # noqa: E501
+                    (
+                        "failed",
+                        json.dumps(result_data),
+                        error_from_agent,
+                        datetime.datetime.now().isoformat(),
+                        subtask_id,
+                    ),
+                )
+                final_status = {
+                    "error": error_from_agent,
+                    "subtask_id": subtask_id,
+                    "output": result_data,
+                }
             else:
                 self.cursor.execute(
-                    "UPDATE tasks SET status = ?, result = ?, updated_at = ? WHERE task_id = ?",
-                    ("completed", json.dumps(result_data), datetime.datetime.now().isoformat(), subtask_id)
+                    "UPDATE tasks SET status = ?, result = ?, updated_at = ? WHERE task_id = ?",  # noqa: E501
+                    (
+                        "completed",
+                        json.dumps(result_data),
+                        datetime.datetime.now().isoformat(),
+                        subtask_id,
+                    ),
                 )
-                final_status = {"success": True, "subtask_id": subtask_id, "output": result_data}
-            
+                final_status = {
+                    "success": True,
+                    "subtask_id": subtask_id,
+                    "output": result_data,
+                }
+
             self.db_connection.commit()
             return final_status
 
         except Exception as e:
-            logger.error(f"[{subtask_id}] Error during subtask execution by '{agent_name}': {e}", exc_info=True)
-            error_message = f"Execution error by agent '{agent_name}': {str(e)}"
+            logger.error(
+                f"[{subtask_id}] Error during subtask execution by '{agent_name}': {e}",  # noqa: E501
+                exc_info=True,
+            )
+            error_message = (
+                f"Execution error by agent '{agent_name}': {str(e)}"
+            )
             self.cursor.execute(
-                "UPDATE tasks SET status = ?, error_message = ?, updated_at = ? WHERE task_id = ?",
-                ("failed", error_message, datetime.datetime.now().isoformat(), subtask_id)
+                "UPDATE tasks SET status = ?, error_message = ?, updated_at = ? WHERE task_id = ?",  # noqa: E501
+                (
+                    "failed",
+                    error_message,
+                    datetime.datetime.now().isoformat(),
+                    subtask_id,
+                ),
             )
             self.db_connection.commit()
             return {"error": error_message, "subtask_id": subtask_id}
@@ -1349,16 +1515,11 @@ class Swarm:
             logger.error("OrganizerAgent not found")
             return {"error": "OrganizerAgent not found"}
 
-        available_agents = {
-            "workers": [a.name for a in self.agents.values()],
-            "supervisors": [a.name for a in self.supervisors.values()],
-        }
-
         prompt = (
-            f"Analyze this task and organize a workflow to accomplish it effectively:\n\n"
+            f"Analyze this task and organize a workflow to accomplish it effectively:\n\n"  # noqa: E501
             f"Task: {task}\n\n"
-            f"Available agents: {', '.join(list(self.agents.keys()) + list(self.supervisors.keys()))}\n\n"
-            "Break down the task into subtasks and assign them to appropriate agents. "
+            f"Available agents: {', '.join(list(self.agents.keys()) + list(self.supervisors.keys()))}\n\n"  # noqa: E501
+            "Break down the task into subtasks and assign them to appropriate agents. "  # noqa: E501
             "For each subtask, specify:\n"
             "1. The agent to handle it\n"
             "2. The specific subtask description\n"
@@ -1367,18 +1528,24 @@ class Swarm:
         )
 
         try:
-            logger.info(f"[{self.__class__.__name__}] About to call OrganizerAgent ({organizer.llm_model_identifier}) _get_llm_response for task: {task[:50]}...")
+            logger.info(
+                f"[{self.__class__.__name__}] About to call OrganizerAgent ({organizer.llm_model_identifier}) _get_llm_response for task: {task[:50]}..."  # noqa: E501
+            )
             workflow_plan = organizer._get_llm_response(prompt)
-            logger.info(f"[{self.__class__.__name__}] OrganizerAgent call returned. Workflow plan received (first 100 chars): {str(workflow_plan)[:100]}")
+            logger.info(
+                f"[{self.__class__.__name__}] OrganizerAgent call returned. Workflow plan received (first 100 chars): {str(workflow_plan)[:100]}"  # noqa: E501
+            )
 
-            # Handle potential non-string responses from _get_llm_response if necessary
+            # Handle potential non-string responses from _get_llm_response if necessary  # noqa: E501
             if not isinstance(workflow_plan, str):
                 logger.warning(
-                    f"Unexpected response type from organizer._get_llm_response: {type(workflow_plan)}. Converting to string."
+                    f"Unexpected response type from organizer._get_llm_response: {type(workflow_plan)}. Converting to string."  # noqa: E501
                 )
                 workflow_plan = str(workflow_plan)
 
-            json_match = re.search(r"```json\n(.*?)\n```", workflow_plan, re.DOTALL)
+            json_match = re.search(
+                r"```json\n(.*?)\n```", workflow_plan, re.DOTALL
+            )
             if json_match:
                 workflow_json = json_match.group(1)
             else:
@@ -1392,7 +1559,7 @@ class Swarm:
                 workflow = json.loads(workflow_json)
             except json.JSONDecodeError:
                 logger.error(
-                    f"Could not parse workflow JSON: {workflow_json}. Falling back."
+                    f"Could not parse workflow JSON: {workflow_json}. Falling back."  # noqa: E501
                 )
                 workflow = {
                     "workflow": [
@@ -1406,23 +1573,36 @@ class Swarm:
                     ]
                 }
 
+            # Initialize parsed_workflow to ensure it's always defined
+            parsed_workflow = workflow
+
             actual_steps = None
             if isinstance(parsed_workflow, dict):
                 # Try common keys where the list of steps might be nested
-                if "subtasks" in parsed_workflow and isinstance(parsed_workflow["subtasks"], list):
+                if "subtasks" in parsed_workflow and isinstance(
+                    parsed_workflow["subtasks"], list
+                ):
                     actual_steps = parsed_workflow["subtasks"]
-                elif "steps" in parsed_workflow and isinstance(parsed_workflow["steps"], list):
+                elif "steps" in parsed_workflow and isinstance(
+                    parsed_workflow["steps"], list
+                ):
                     actual_steps = parsed_workflow["steps"]
                 elif "workflow" in parsed_workflow:
-                    # If 'workflow' key exists, check if IT is the list or contains the list
+                    # If 'workflow' key exists, check if IT is the list or contains the list  # noqa: E501
                     if isinstance(parsed_workflow["workflow"], list):
                         actual_steps = parsed_workflow["workflow"]
                     elif isinstance(parsed_workflow["workflow"], dict):
-                        if "subtasks" in parsed_workflow["workflow"] and isinstance(
+                        if "subtasks" in parsed_workflow[
+                            "workflow"
+                        ] and isinstance(
                             parsed_workflow["workflow"]["subtasks"], list
                         ):
-                            actual_steps = parsed_workflow["workflow"]["subtasks"]
-                        elif "steps" in parsed_workflow["workflow"] and isinstance(
+                            actual_steps = parsed_workflow["workflow"][
+                                "subtasks"
+                            ]
+                        elif "steps" in parsed_workflow[
+                            "workflow"
+                        ] and isinstance(
                             parsed_workflow["workflow"]["steps"], list
                         ):
                             actual_steps = parsed_workflow["workflow"]["steps"]
@@ -1432,27 +1612,33 @@ class Swarm:
 
             if not actual_steps:
                 logger.warning(
-                    f"[{parent_task_id}] Could not extract a list of steps from the parsed workflow: {parsed_workflow}. Falling back to single step execution."
+                    f"Could not extract a list of steps from the parsed workflow: {parsed_workflow}. Falling back to single step execution."  # noqa: E501
                 )
-                # Fallback: Treat the original task as a single step for the first available agent
+                # Fallback: Treat the original task as a single step for the first available agent  # noqa: E501
                 first_agent_name = next(
                     iter(self.agents), "GeographyAgent"
                 )  # Default fallback agent
-                actual_steps = [{"step": 1, "agent": first_agent_name, "subtask": task}]
+                actual_steps = [
+                    {"step": 1, "agent": first_agent_name, "subtask": task}
+                ]
                 parsed_workflow = {
                     "subtasks": actual_steps
-                }  # Ensure parsed_workflow variable holds the steps for later return
+                }  # Ensure parsed_workflow variable holds the steps for later return  # noqa: E501
             # --- End Improved Extraction ---
 
             # Now execute the extracted steps
-            logger.info(f"Executing workflow with {len(actual_steps)} steps extracted.")
-            results: List[Dict[str, Any]] = self._execute_workflow(actual_steps, task)
+            logger.info(
+                f"Executing workflow with {len(actual_steps)} steps extracted."
+            )
+            results: List[Dict[str, Any]] = self._execute_workflow(
+                actual_steps, task
+            )
             # Combine results (using the corrected _combine_results method)
             combined_result = self._combine_results(results, task)
             # Return success case inside the try block
             return {
                 "status": "success",
-                "workflow": workflow,  # Return the workflow structure used (might be the fallback)
+                "workflow": workflow,  # Return the workflow structure used (might be the fallback)  # noqa: E501
                 "results": results,
                 "combined_result": combined_result,
             }
@@ -1481,7 +1667,7 @@ class Swarm:
                 sort_key = "step"
             else:
                 logger.warning(
-                    "No 'order' or 'step' key found in steps. Assuming order as given."
+                    "No 'order' or 'step' key found in steps. Assuming order as given."  # noqa: E501
                 )
 
         if sort_key:
@@ -1535,26 +1721,29 @@ class Swarm:
             supervisor = self.meta_agents.get("OrganizerAgent")
 
         if not supervisor:
-            return {"combined_output": combined_input, "method": "simple_concatenation"}
+            return {
+                "combined_output": combined_input,
+                "method": "simple_concatenation",
+            }
 
         prompt = (
             f"Task: {task}\n\n"
-            "Combine the following outputs:\n{combined_input}\n\nUnified Response:"
+            "Combine the following outputs:\n{combined_input}\n\nUnified Response:"  # noqa: E501
         )
 
         try:
-            # Construct the full prompt including system instructions if available
+            # Construct the full prompt including system instructions if available  # noqa: E501
             # Note: _get_llm_response in Agent class might need adjustment
             # if it doesn't inherently use agent.instructions as system prompt.
             # For now, assume _get_llm_response handles the full interaction.
-            # A potential refinement could be passing system message explicitly if needed.
+            # A potential refinement could be passing system message explicitly if needed.  # noqa: E501
 
             combined_output = supervisor._get_llm_response(prompt)
 
-            # Handle potential non-string responses from _get_llm_response if necessary
+            # Handle potential non-string responses from _get_llm_response if necessary  # noqa: E501
             if not isinstance(combined_output, str):
                 logger.warning(
-                    f"Unexpected response type from supervisor._get_llm_response: {type(combined_output)}. Converting to string."
+                    f"Unexpected response type from supervisor._get_llm_response: {type(combined_output)}. Converting to string."  # noqa: E501
                 )
                 combined_output = str(combined_output)
 
@@ -1567,14 +1756,33 @@ class Swarm:
             logger.error(f"Error combining results: {e}")
             return {"error": str(e), "method": "error_in_combination"}
 
-    def _register_subtask(self, parent_task_id: str, subtask_description: str, assigned_agent_name: str) -> str:
+    def _register_subtask(
+        self,
+        parent_task_id: str,
+        subtask_description: str,
+        assigned_agent_name: str,
+    ) -> str:
         subtask_id = str(uuid.uuid4())
         now = datetime.datetime.now().isoformat()
         try:
-            logger.info(f"Registering subtask {subtask_id} for parent {parent_task_id}. Assigned to: {assigned_agent_name}")
+            logger.info(
+                f"Registering subtask {subtask_id} for parent {parent_task_id}. Assigned to: {assigned_agent_name}"  # noqa: E501
+            )
             self.cursor.execute(
-                "INSERT INTO tasks (task_id, description, status, created_at, updated_at, parent_task_id, is_subtask, assigned_agent_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (subtask_id, subtask_description, "queued", now, now, parent_task_id, 1, assigned_agent_name), # is_subtask = 1 (True)
+                "INSERT INTO tasks "
+                "(task_id, description, status, created_at, updated_at, "
+                "parent_task_id, is_subtask, assigned_agent_name) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    subtask_id,
+                    subtask_description,
+                    "queued",
+                    now,
+                    now,
+                    parent_task_id,
+                    1,
+                    assigned_agent_name,
+                ),  # is_subtask = 1 (True)
             )
             self.db_connection.commit()
             logger.info(f"Subtask {subtask_id} registered successfully.")
@@ -1585,145 +1793,195 @@ class Swarm:
 
     def run(self, task_description: str, task_id: str) -> Dict[str, Any]:
         """
-        Main entry point for processing a task. 
-        This will typically involve organizing the task for supervision (decomposition).
-        """
-        logger.info(f"Swarm.run called for task_id: {task_id}, description: {task_description[:100]}...")
-        # For now, assume all tasks passed to Swarm.run are to be supervised and decomposed.
-        # In the future, logic could be added here to differentiate simple vs. complex tasks.
-        return self.organize_task_for_supervision(task=task_description, parent_task_id=task_id)
-
-    def organize_task_for_supervision(self, task: str, parent_task_id: str) -> Dict[str, Any]:
-        """
-        Orchestrates task decomposition using an OrganizerAgent, registers subtasks,
-        updates the parent task status to 'awaiting_subtasks', and returns information about the subtasks.
+        Main entry point for processing a task.
+        This will typically involve organizing the task for supervision (decomposition).  # noqa: E501
         """
         logger.info(
-            f"[{parent_task_id}] Supervisor: Organizing task for supervision: {task[:100]}..."
+            f"Swarm.run called for task_id: {task_id}, description: {task_description[:100]}..."  # noqa: E501
+        )
+        # For now, assume all tasks passed to Swarm.run are to be supervised and decomposed.  # noqa: E501
+        # In the future, logic could be added here to differentiate simple vs. complex tasks.  # noqa: E501
+        return self.organize_task_for_supervision(
+            task=task_description, parent_task_id=task_id
+        )
+
+    def organize_task_for_supervision(
+        self, task: str, parent_task_id: str
+    ) -> Dict[str, Any]:
+        """
+        Orchestrates task decomposition using an OrganizerAgent, registers subtasks,  # noqa: E501
+        updates the parent task status to 'awaiting_subtasks', and returns information about the subtasks.  # noqa: E501
+        """
+        logger.info(
+            f"[{parent_task_id}] Supervisor: Organizing task for supervision: {task[:100]}..."  # noqa: E501
         )
         organizer = self.meta_agents.get("OrganizerAgent")
         if not organizer:
-            logger.error(f"[{parent_task_id}] OrganizerAgent not found. Parent task {parent_task_id} will be marked as failed.")
+            logger.error(
+                f"[{parent_task_id}] OrganizerAgent not found. Parent task {parent_task_id} will be marked as failed."  # noqa: E501
+            )
             self.cursor.execute(
-                "UPDATE tasks SET status = ?, error_message = ?, updated_at = ? WHERE task_id = ?",
-                ("failed", "OrganizerAgent not found for decomposition", datetime.datetime.now().isoformat(), parent_task_id),
+                "UPDATE tasks SET status = ?, error_message = ?, updated_at = ? WHERE task_id = ?",  # noqa: E501
+                (
+                    "failed",
+                    "OrganizerAgent not found for decomposition",
+                    datetime.datetime.now().isoformat(),
+                    parent_task_id,
+                ),
             )
             self.db_connection.commit()
             return {"error": "OrganizerAgent not found"}
 
-        # Construct a more detailed and prescriptive prompt for the OrganizerAgent
-        worker_agent_names = [name for name, agent_obj in self.agents.items() if hasattr(agent_obj, 'role') and agent_obj.role == "worker"]
-        supervisor_agent_names = [name for name, agent_obj in self.supervisors.items() if hasattr(agent_obj, 'role') and agent_obj.role == "supervisor"]
-    
+        # Construct a more detailed and prescriptive prompt for the OrganizerAgent  # noqa: E501
+        worker_agent_names = [
+            name
+            for name, agent_obj in self.agents.items()
+            if hasattr(agent_obj, "role") and agent_obj.role == "worker"
+        ]
+        supervisor_agent_names = [
+            name
+            for name, agent_obj in self.supervisors.items()
+            if hasattr(agent_obj, "role") and agent_obj.role == "supervisor"
+        ]
+
         # If no agents have roles defined, fall back to using all agents
         if not worker_agent_names and not supervisor_agent_names:
             worker_agent_names = list(self.agents.keys())
             supervisor_agent_names = list(self.supervisors.keys())
-            
+
         assignable_agents = worker_agent_names + supervisor_agent_names
-        
+
         if not assignable_agents:
-            assignable_agents_str = "No specific worker/supervisor agents available. You may need to suggest generic roles or indicate if the task cannot be handled."
+            assignable_agents_str = "No specific worker/supervisor agents available. You may need to suggest generic roles or indicate if the task cannot be handled."  # noqa: E501
         else:
-            assignable_agents_str = ", ".join(sorted(list(set(assignable_agents)))) # Sort and unique
+            assignable_agents_str = ", ".join(
+                sorted(list(set(assignable_agents)))
+            )  # Sort and unique
 
         prompt = (
-            f"You are an Organizer Agent. Your primary function is to decompose a given complex task into a sequence of smaller, actionable subtasks. \n\n"
-            f"YOU MUST FORMAT YOUR OUTPUT AS A SINGLE JSON OBJECT with this exact structure:\n"
+            f"You are an Organizer Agent. Your primary function is to decompose a given complex task into a sequence of smaller, actionable subtasks. \n\n"  # noqa: E501
+            f"YOU MUST FORMAT YOUR OUTPUT AS A SINGLE JSON OBJECT with this exact structure:\n"  # noqa: E501
             f"{{\n"
-            f"  \"subtasks\": [\n"
-            f"    {{\"agent\": \"AgentName1\", \"subtask\": \"Description for subtask 1\"}},\n"
-            f"    {{\"agent\": \"AgentName2\", \"subtask\": \"Description for subtask 2\"}},\n"
+            f'  "subtasks": [\n'
+            f'    {{"agent": "AgentName1", "subtask": "Description for subtask 1"}},\n'  # noqa: E501
+            f'    {{"agent": "AgentName2", "subtask": "Description for subtask 2"}},\n'  # noqa: E501
             f"    ...\n"
             f"  ]\n"
             f"}}\n\n"
-            
             f"IMPORTANT RULES:\n"
-            f"1. Your output MUST be ONLY the JSON object with no additional text\n"
-            f"2. Each subtask object MUST have exactly two keys: 'agent' and 'subtask'\n"
-            f"3. The 'agent' value MUST be one of these exact names: {assignable_agents_str}\n"
-            f"4. If you think a new agent type is needed, assign that subtask to a supervisor agent\n\n"
-            
+            f"1. Your output MUST be ONLY the JSON object with no additional text\n"  # noqa: E501
+            f"2. Each subtask object MUST have exactly two keys: 'agent' and 'subtask'\n"  # noqa: E501
+            f"3. The 'agent' value MUST be one of these exact names: {assignable_agents_str}\n"  # noqa: E501
+            f"4. If you think a new agent type is needed, assign that subtask to a supervisor agent\n\n"  # noqa: E501
             f"MAIN TASK TO DECOMPOSE:\n{task}\n\n"
-            
             f"AVAILABLE AGENTS: {assignable_agents_str}\n\n"
-            
             f"Remember: Output ONLY the JSON object with the subtasks array.\n"
-            f"If the task is simple, you can create just one subtask assigned to the most appropriate agent."
+            f"If the task is simple, you can create just one subtask assigned to the most appropriate agent."  # noqa: E501
         )
 
         try:
             logger.info(
-                f"[{parent_task_id}] About to call OrganizerAgent ({organizer.llm_model_identifier}) _get_llm_response for task: {task[:50]}..."
+                f"[{parent_task_id}] About to call OrganizerAgent ({organizer.llm_model_identifier}) _get_llm_response for task: {task[:50]}..."  # noqa: E501
             )
             workflow_plan_str = organizer._get_llm_response(prompt)
             if not workflow_plan_str:
-                logger.error(f"[{parent_task_id}] OrganizerAgent returned an empty response. Falling back to single task execution.")
+                logger.error(
+                    f"[{parent_task_id}] OrganizerAgent returned an empty response. Falling back to single task execution."  # noqa: E501
+                )
                 raise ValueError("OrganizerAgent returned an empty plan")
-                
+
             logger.info(
-                f"[{parent_task_id}] OrganizerAgent call returned. Workflow plan received (first 200 chars): {str(workflow_plan_str)[:200]}"
+                f"[{parent_task_id}] OrganizerAgent call returned. Workflow plan received (first 200 chars): {str(workflow_plan_str)[:200]}"  # noqa: E501
             )
 
-            # Handle potential non-string responses from _get_llm_response if necessary
+            # Handle potential non-string responses from _get_llm_response if necessary  # noqa: E501
             if not isinstance(workflow_plan_str, str):
                 logger.warning(
-                    f"[{parent_task_id}] Unexpected response type from organizer._get_llm_response: {type(workflow_plan_str)}. Converting to string."
+                    f"[{parent_task_id}] Unexpected response type from organizer._get_llm_response: {type(workflow_plan_str)}. Converting to string."  # noqa: E501
                 )
                 workflow_plan_str = str(workflow_plan_str)
 
             # Enhanced JSON extraction with multiple patterns
             workflow_json_str = None
-            
+
             # Try to find JSON in code blocks (```json ... ```)
-            json_block_match = re.search(r'```(?:json)?\s*\n(.*?)\n\s*```', workflow_plan_str, re.DOTALL | re.IGNORECASE)
+            json_block_match = re.search(
+                r"```(?:json)?\s*\n(.*?)\n\s*```",
+                workflow_plan_str,
+                re.DOTALL | re.IGNORECASE,
+            )
             if json_block_match:
                 workflow_json_str = json_block_match.group(1).strip()
-                logger.info(f"[{parent_task_id}] Extracted JSON from code block format")
-        
+                logger.info(
+                    f"[{parent_task_id}] Extracted JSON from code block format"
+                )
+
             # If not found in code blocks, try to find a JSON object directly
             if not workflow_json_str:
                 # Look for a complete JSON object with balanced braces
-                json_obj_match = re.search(r'(\{(?:[^{}]|(?:\{(?:[^{}]|(?:\{[^{}]*\}))*\}))*\})', workflow_plan_str, re.DOTALL)
+                json_obj_match = re.search(
+                    r"(\{(?:[^{}]|(?:\{(?:[^{}]|(?:\{[^{}]*\}))*\}))*\})",
+                    workflow_plan_str,
+                    re.DOTALL,
+                )
                 if json_obj_match:
                     workflow_json_str = json_obj_match.group(1).strip()
-                    logger.info(f"[{parent_task_id}] Extracted JSON using direct object pattern match")
-            
-            # If still not found, assume the entire response might be JSON (last resort)
+                    logger.info(
+                        f"[{parent_task_id}] Extracted JSON using direct object pattern match"  # noqa: E501
+                    )
+
+            # If still not found, assume the entire response might be JSON (last resort)  # noqa: E501
             if not workflow_json_str:
                 workflow_json_str = workflow_plan_str.strip()
-                logger.info(f"[{parent_task_id}] No specific JSON pattern found, attempting to parse entire response")
+                logger.info(
+                    f"[{parent_task_id}] No specific JSON pattern found, attempting to parse entire response"  # noqa: E501
+                )
 
             # Try to parse the extracted JSON string
+            parsed_workflow = None
             try:
                 parsed_workflow = json.loads(workflow_json_str)
-                logger.info(f"[{parent_task_id}] Successfully parsed JSON: {str(parsed_workflow)[:100]}...")
+                logger.info(
+                    f"[{parent_task_id}] Successfully parsed JSON: {str(parsed_workflow)[:100]}..."  # noqa: E501
+                )
             except json.JSONDecodeError as e:
-                logger.error(f"[{parent_task_id}] JSON parsing error: {e}. Workflow JSON: {workflow_json_str[:200]}...")
-                
+                logger.error(
+                    f"[{parent_task_id}] JSON parsing error: {e}. Workflow JSON: {workflow_json_str[:200]}..."  # noqa: E501
+                )
+
                 # Attempt to fix common JSON issues
                 fixed_json = False
-                
+
                 # Try adding missing quotes around keys
                 try:
-                    fixed_json_str = re.sub(r'([{,])\s*([a-zA-Z0-9_]+)\s*:', r'\1"\2":', workflow_json_str)
+                    fixed_json_str = re.sub(
+                        r"([{,])\s*([a-zA-Z0-9_]+)\s*:",
+                        r'\1"\2":',
+                        workflow_json_str,
+                    )
                     parsed_workflow = json.loads(fixed_json_str)
                     fixed_json = True
-                    logger.info(f"[{parent_task_id}] Fixed JSON by adding quotes around keys")
-                except:
+                    logger.info(
+                        f"[{parent_task_id}] Fixed JSON by adding quotes around keys"  # noqa: E501
+                    )
+                except (json.JSONDecodeError, re.error) as e:
+                    logger.warning(
+                        f"[{parent_task_id}] Failed to fix JSON: {e}"
+                    )
                     pass
-                
+
                 # If still not fixed, fall back to a default structure
                 if not fixed_json:
-                    logger.warning(f"[{parent_task_id}] Could not fix JSON. Using fallback structure.")
-                    # Fallback: Create a default workflow with the original task assigned to the first available agent
-                    first_agent_name = next(iter(self.agents), "GeographyAgent")
+                    logger.warning(
+                        f"[{parent_task_id}] Could not fix JSON. Using fallback structure."  # noqa: E501
+                    )
+                    # Fallback: Create a default workflow with the original task assigned to the first available agent  # noqa: E501
+                    first_agent_name = next(
+                        iter(self.agents), "GeographyAgent"
+                    )
                     parsed_workflow = {
                         "subtasks": [
-                            {
-                                "agent": first_agent_name,
-                                "subtask": task
-                            }
+                            {"agent": first_agent_name, "subtask": task}
                         ]
                     }
 
@@ -1731,108 +1989,175 @@ class Swarm:
             actual_steps = None
             if isinstance(parsed_workflow, dict):
                 # Try common keys where the list of steps might be nested
-                if "subtasks" in parsed_workflow and isinstance(parsed_workflow["subtasks"], list):
+                if "subtasks" in parsed_workflow and isinstance(
+                    parsed_workflow["subtasks"], list
+                ):
                     actual_steps = parsed_workflow["subtasks"]
-                    logger.info(f"[{parent_task_id}] Found subtasks list with {len(actual_steps)} items")
-                elif "steps" in parsed_workflow and isinstance(parsed_workflow["steps"], list):
+                    logger.info(
+                        f"[{parent_task_id}] Found subtasks list with {len(actual_steps)} items"  # noqa: E501
+                    )
+                elif "steps" in parsed_workflow and isinstance(
+                    parsed_workflow["steps"], list
+                ):
                     actual_steps = parsed_workflow["steps"]
-                    logger.info(f"[{parent_task_id}] Found steps list with {len(actual_steps)} items")
+                    logger.info(
+                        f"[{parent_task_id}] Found steps list with {len(actual_steps)} items"  # noqa: E501
+                    )
                 elif "workflow" in parsed_workflow:
-                    # If 'workflow' key exists, check if IT is the list or contains the list
+                    # If 'workflow' key exists, check if IT is the list or contains the list  # noqa: E501
                     if isinstance(parsed_workflow["workflow"], list):
                         actual_steps = parsed_workflow["workflow"]
-                        logger.info(f"[{parent_task_id}] Found workflow list with {len(actual_steps)} items")
+                        logger.info(
+                            f"[{parent_task_id}] Found workflow list with {len(actual_steps)} items"  # noqa: E501
+                        )
                     elif isinstance(parsed_workflow["workflow"], dict):
-                        if "subtasks" in parsed_workflow["workflow"] and isinstance(
+                        if "subtasks" in parsed_workflow[
+                            "workflow"
+                        ] and isinstance(
                             parsed_workflow["workflow"]["subtasks"], list
                         ):
-                            actual_steps = parsed_workflow["workflow"]["subtasks"]
-                            logger.info(f"[{parent_task_id}] Found nested subtasks list with {len(actual_steps)} items")
-                        elif "steps" in parsed_workflow["workflow"] and isinstance(
+                            actual_steps = parsed_workflow["workflow"][
+                                "subtasks"
+                            ]
+                            logger.info(
+                                f"[{parent_task_id}] Found nested subtasks list with {len(actual_steps)} items"  # noqa: E501
+                            )
+                        elif "steps" in parsed_workflow[
+                            "workflow"
+                        ] and isinstance(
                             parsed_workflow["workflow"]["steps"], list
                         ):
                             actual_steps = parsed_workflow["workflow"]["steps"]
-                            logger.info(f"[{parent_task_id}] Found nested steps list with {len(actual_steps)} items")
+                            logger.info(
+                                f"[{parent_task_id}] Found nested steps list with {len(actual_steps)} items"  # noqa: E501
+                            )
             elif isinstance(parsed_workflow, list):
                 # Handle case where the root JSON object IS the list of steps
                 actual_steps = parsed_workflow
-                logger.info(f"[{parent_task_id}] Found root list with {len(actual_steps)} items")
+                logger.info(
+                    f"[{parent_task_id}] Found root list with {len(actual_steps)} items"  # noqa: E501
+                )
 
             if not actual_steps:
                 logger.warning(
-                    f"[{parent_task_id}] Could not extract a list of steps from the parsed workflow: {parsed_workflow}. Falling back to single step execution."
+                    f"[{parent_task_id}] Could not extract a list of steps from the parsed workflow: {parsed_workflow}. Falling back to single step execution."  # noqa: E501
                 )
-                # Fallback: Treat the original task as a single step for the first available agent
+                # Fallback: Treat the original task as a single step for the first available agent  # noqa: E501
                 first_agent_name = next(
                     iter(self.agents), "GeographyAgent"
                 )  # Default fallback agent
-                actual_steps = [{"step": 1, "agent": first_agent_name, "subtask": task}]
+                actual_steps = [
+                    {"step": 1, "agent": first_agent_name, "subtask": task}
+                ]
                 parsed_workflow = {
                     "subtasks": actual_steps
-                }  # Ensure parsed_workflow variable holds the steps for later return
+                }  # Ensure parsed_workflow variable holds the steps for later return  # noqa: E501
 
             # Register subtasks
             subtask_ids = []
             for step in actual_steps:
                 # Ensure step has the required fields
-                if not isinstance(step, dict) or "agent" not in step or "subtask" not in step:
-                    if "step" in step and "agent" in step and "subtask" in step:
-                        # Handle the case where we have {"step": 1, "agent": "...", "subtask": "..."}
+                if (
+                    not isinstance(step, dict)
+                    or "agent" not in step
+                    or "subtask" not in step
+                ):
+                    if (
+                        "step" in step
+                        and "agent" in step
+                        and "subtask" in step
+                    ):
+                        # Handle the case where we have {"step": 1, "agent": "...", "subtask": "..."}  # noqa: E501
                         agent_name = step["agent"]
                         subtask_description = step["subtask"]
                     else:
-                        logger.warning(f"[{parent_task_id}] Invalid step format: {step}. Skipping.")
+                        logger.warning(
+                            f"[{parent_task_id}] Invalid step format: {step}. Skipping."  # noqa: E501
+                        )
                         continue
                 else:
                     agent_name = step["agent"]
                     subtask_description = step["subtask"]
-                
+
                 # Validate agent exists
-                if not (agent_name in self.agents or agent_name in self.supervisors or agent_name in self.meta_agents):
-                    logger.warning(f"[{parent_task_id}] Agent '{agent_name}' not found. Assigning to first available agent.")
+                if not (
+                    agent_name in self.agents
+                    or agent_name in self.supervisors
+                    or agent_name in self.meta_agents
+                ):
+                    logger.warning(
+                        f"[{parent_task_id}] Agent '{agent_name}' not found. Assigning to first available agent."  # noqa: E501
+                    )
                     agent_name = next(iter(self.agents), None)
                     if not agent_name:
-                        logger.error(f"[{parent_task_id}] No agents available to assign subtask. Skipping.")
+                        logger.error(
+                            f"[{parent_task_id}] No agents available to assign subtask. Skipping."  # noqa: E501
+                        )
                         continue
-                
-                subtask_id = self._register_subtask(parent_task_id, subtask_description, agent_name)
+
+                subtask_id = self._register_subtask(
+                    parent_task_id, subtask_description, agent_name
+                )
                 if subtask_id:
                     subtask_ids.append(subtask_id)
-                    logger.info(f"[{parent_task_id}] Registered subtask {subtask_id} for agent '{agent_name}': {subtask_description[:50]}...")
+                    logger.info(
+                        f"[{parent_task_id}] Registered subtask {subtask_id} for agent '{agent_name}': {subtask_description[:50]}..."  # noqa: E501
+                    )
                 else:
-                    logger.error(f"[{parent_task_id}] Failed to register subtask for step: {step}")
+                    logger.error(
+                        f"[{parent_task_id}] Failed to register subtask for step: {step}"  # noqa: E501
+                    )
 
             if not subtask_ids:
-                logger.error(f"[{parent_task_id}] No subtasks were successfully registered. Task cannot proceed.")
+                logger.error(
+                    f"[{parent_task_id}] No subtasks were successfully registered. Task cannot proceed."  # noqa: E501
+                )
                 raise ValueError("No subtasks registered from the plan")
 
-            # IMPORTANT: Update parent task status to 'awaiting_subtasks' instead of 'running'
+            # IMPORTANT: Update parent task status to 'awaiting_subtasks' instead of 'running'  # noqa: E501
             self.cursor.execute(
-                "UPDATE tasks SET status = ?, updated_at = ? WHERE task_id = ?",
-                ("awaiting_subtasks", datetime.datetime.now().isoformat(), parent_task_id),
+                "UPDATE tasks SET status = ?, updated_at = ? WHERE task_id = ?",  # noqa: E501
+                (
+                    "awaiting_subtasks",
+                    datetime.datetime.now().isoformat(),
+                    parent_task_id,
+                ),
             )
             self.db_connection.commit()
-            logger.info(f"[{parent_task_id}] Parent task status updated to 'awaiting_subtasks'. {len(subtask_ids)} subtasks created.")
+            logger.info(
+                f"[{parent_task_id}] Parent task status updated to 'awaiting_subtasks'. {len(subtask_ids)} subtasks created."  # noqa: E501
+            )
 
             return {
                 "status": "decomposed",
                 "message": f"Task decomposed into {len(subtask_ids)} subtasks",
                 "parent_task_id": parent_task_id,
                 "subtask_ids": subtask_ids,
-                "workflow": parsed_workflow
+                "workflow": parsed_workflow,
             }
         except Exception as e:
             logger.error(
-                f"[{parent_task_id}] Error organizing task for supervision: {e}", exc_info=True
+                f"[{parent_task_id}] Error organizing task for supervision: {e}",  # noqa: E501
+                exc_info=True,
             )
             # Update parent task to failed if decomposition fails critically
             try:
                 self.cursor.execute(
-                    "UPDATE tasks SET status = ?, error_message = ?, updated_at = ? WHERE task_id = ?",
-                    ("failed", f"Failed to decompose task: {str(e)}", datetime.datetime.now().isoformat(), parent_task_id),
+                    "UPDATE tasks SET status = ?, error_message = ?, updated_at = ? WHERE task_id = ?",  # noqa: E501
+                    (
+                        "failed",
+                        f"Failed to decompose task: {str(e)}",
+                        datetime.datetime.now().isoformat(),
+                        parent_task_id,
+                    ),
                 )
                 self.db_connection.commit()
             except Exception as db_err:
-                logger.error(f"[{parent_task_id}] Additionally, DB error while marking task as failed: {db_err}")
-                
-            return {"status": "error", "message": f"Failed to organize task: {str(e)}"}
+                logger.error(
+                    f"[{parent_task_id}] Additionally, DB error while marking task as failed: {db_err}"  # noqa: E501
+                )
+
+            return {
+                "status": "error",
+                "message": f"Failed to organize task: {str(e)}",
+            }
